@@ -13,6 +13,8 @@ import os
 from typing import Dict, Any, Optional, List
 from pathlib import Path
 
+from app.models import ToolRequirement
+
 logger = logging.getLogger(__name__)
 
 
@@ -56,24 +58,18 @@ def authenticate_codex(api_key: str) -> bool:
         return False
 
 
-async def execute_codex_implement(
-    tool_name: str,
-    requirements: List[Dict[str, Any]]
-) -> Dict[str, Any]:
+async def execute_codex_implement(requirement: ToolRequirement) -> Dict[str, Any]:
     """
     Execute Codex to implement/generate code in tool_service directory.
 
     Args:
-        tool_name: Name of the tool to implement
-        requirements: List of requirement dicts, each containing:
-            - name: Function name
-            - params: List of parameter specs with name, type, description
-            - returns: Return type and description
-            - description: Function description
+        requirement: requirement of the tool
 
     Returns:
         Dict with implementation result
     """
+    tool_name = requirement.name
+
     try:
         # Get configurable paths from settings
         from app.config import get_settings
@@ -88,7 +84,7 @@ async def execute_codex_implement(
         tools_dir.mkdir(parents=True, exist_ok=True)
 
         # Build the implementation prompt
-        prompt = _build_implementation_prompt(tool_name, requirements, settings)
+        prompt = _build_implementation_prompt(requirement, settings)
 
         # Build command - change to tool_service directory first
         cmd = [
@@ -112,20 +108,20 @@ async def execute_codex_implement(
                     "success": True,
                     "tool_name": tool_name,
                     "output_file": str(output_file),
-                    "message": "Tool implementation completed",
-                    "stdout": result["stdout"]
                 }
             else:
                 logger.warning(f"Codex completed but file not found: {output_file}")
+                logger.warning(f"stdout: {result['stdout']}")
+                logger.warning(f"stderr: {result['stderr']}")
                 return {
                     "success": False,
                     "tool_name": tool_name,
                     "error": f"Generated file not found: {output_file}",
-                    "stdout": result["stdout"],
-                    "stderr": result["stderr"]
                 }
         else:
             logger.error(f"Codex implementation failed for tool {tool_name}: {result['error']}")
+            logger.error(f"stdout: {result['stdout']}")
+            logger.error(f"stderr: {result['stderr']}")
             return {
                 "success": False,
                 "tool_name": tool_name,
@@ -334,7 +330,7 @@ async def _run_codex_command(cmd: List[str], timeout: int = 120) -> Dict[str, An
         }
 
 
-def _build_implementation_prompt(tool_name: str, requirements: List[Dict[str, Any]], settings) -> str:
+def _build_implementation_prompt(requirement: ToolRequirement, settings) -> str:
     """
     Build a detailed implementation prompt for Codex.
 
@@ -346,65 +342,41 @@ def _build_implementation_prompt(tool_name: str, requirements: List[Dict[str, An
         Formatted prompt string
     """
     # Start building the prompt
+    tool_name = requirement.name
     prompt_parts = [
-        f"Create a Python tool file named {settings.tools_dir}/{tool_name}.py with the following requirements:",
+        f"Create a Python tool file named {settings.tools_dir}/{tool_name}.py with the following requirement:",
         "",
-        "## Tool Requirements:",
+        "## Tool Requirement:",
+        f"### Function: {requirement.name}",
+        f"**Description:** {requirement.description}",
+        "",
+        "**Parameters:**"
     ]
-
-    # Add each requirement specification
-    for i, req in enumerate(requirements, 1):
+    for input_spec in requirement.input_format:
         prompt_parts.extend([
-            f"### Function {i}: {req.get('name', f'function_{i}')}",
-            f"**Description:** {req.get('description', 'No description provided')}",
-            "",
-            "**Parameters:**"
+            f"name: {input_spec.name}",
+            f"type: {input_spec.type}",
+            f"description: {input_spec.description}",
         ])
 
-        # Add parameter specifications
-        params = req.get('params', [])
-        if params:
-            for param in params:
-                param_name = param.get('name', 'param')
-                param_type = param.get('type', 'Any')
-                param_desc = param.get('description', 'No description')
-                prompt_parts.append(f"- {param_name} ({param_type}): {param_desc}")
-        else:
-            prompt_parts.append("- No parameters")
-
-        # Add return specification
-        returns = req.get('returns', {})
-        return_type = returns.get('type', 'Dict[str, Any]')
-        return_desc = returns.get('description', 'Function result')
-        prompt_parts.extend([
-            "",
-            f"**Returns:** {return_type} - {return_desc}",
-            ""
-        ])
+    # Add return specification
+    output = requirement.output_format
+    prompt_parts.extend([
+        "",
+        f"**Output:** {output.type} - {output.description}",
+        ""
+    ])
 
     # Add implementation requirements
     prompt_parts.extend([
         "## Implementation Requirements:",
-        "1. Import the shared toolset: `from .toolset import toolset`",
-        "2. Use the @toolset.add() decorator to register each function",
-        "3. Include proper type hints and docstrings",
-        "4. Handle errors gracefully with try/catch blocks",
-        "5. Return results in a structured format with success/error indicators",
-        "6. Include chemistry-specific validation where appropriate",
-        "7. Use appropriate chemistry libraries (rdkit, ase, pymatgen, pyscf) as needed",
+        "1. Include proper type hints and docstrings",
+        "2. Handle errors gracefully with try/catch blocks",
+        "3. Return results in a structured format with success/error indicators",
+        "4. Include chemistry-specific validation where appropriate",
+        "5. Use appropriate chemistry libraries (rdkit, ase, pymatgen, pyscf) as needed",
+        f"6. Check {settings.tools_dir}/template.txt for a template"
         "",
-        "## Template Structure:",
-        "```python",
-        "from .toolset import toolset",
-        "from typing import Dict, Any, Optional, List, Union",
-        "import logging",
-        "",
-        "logger = logging.getLogger(__name__)",
-        "",
-        "# Implement each function with @toolset.add() decorator",
-        "# Follow the parameter and return specifications above",
-        "# Include comprehensive error handling",
-        "```",
         "",
         "Generate the complete, production-ready tool implementation.",
         f"Save the file as {settings.tools_dir}/{tool_name}.py"

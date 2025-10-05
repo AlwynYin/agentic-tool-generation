@@ -26,7 +26,7 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager for startup and shutdown."""
     # Startup
     settings = get_settings()
-    print(settings)
+    logging.debug("In debug mode")
     logging.info("🚀 Starting agent-browser backend...")
     logging.info(f"📊 Environment: {settings.environment}")
     logging.info(f"🌐 Port: {settings.port}")
@@ -77,7 +77,7 @@ app.add_middleware(
 )
 
 # Setup logging middleware
-setup_logging_middleware(app)
+setup_logging_middleware(app, settings)
 
 # Include API routers
 app.include_router(health_router, prefix="/api/v1", tags=["health"])
@@ -94,7 +94,6 @@ async def root() -> Dict[str, Any]:
         "status": "running",
         "docs": "/docs",
         "websocket": "/ws/{session_id}",
-        "simpletooling": get_settings().simpletooling_url
     }
 
 

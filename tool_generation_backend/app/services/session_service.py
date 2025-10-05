@@ -3,16 +3,21 @@ Session service for workflow orchestration and management.
 """
 
 import asyncio
-from typing import Optional, Dict, Any, Callable
-from datetime import datetime, timezone
 import logging
+import os
+from xml.dom.domreg import registered
+
+from typing import Optional, Dict, Any, Callable, List
+from datetime import datetime, timezone
 
 from app.models.session import (
-    SessionUpdate, SessionStatus, Session, ToolSpec
+    SessionUpdate, SessionStatus, Session, ToolSpec, ToolGenerationResult
 )
 from app.models.job import UserToolRequirement
+from app.models.operation import OperationContext
 from app.repositories.session_repository import SessionRepository
-from app.agents import AgentManager
+from app.agents.pipeline import ToolGenerationPipeline
+from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -34,14 +39,12 @@ class SessionService:
         """
         self.session_repo = session_repo
 
-        # Initialize OpenAI Agent Manager
-        self.agent_manager = AgentManager()
+        # Initialize Chemistry Tool Pipeline
+        self.pipeline = ToolGenerationPipeline()
 
-        # WebSocket manager for real-time updates (optional)
         self.websocket_manager = websocket_manager
-
-        # Track active workflows
         self.active_workflows: Dict[str, asyncio.Task] = {}
+        self.settings = get_settings()
 
     async def create_session(self, job_id: str, user_id: str, tool_requirements: list[UserToolRequirement], operation_type: str = "generate", base_job_id: Optional[str] = None) -> str:
         """
@@ -207,9 +210,13 @@ class SessionService:
             if not session:
                 raise ValueError(f"Session not found: {session_id}")
 
-            # Build prompt from tool requirements and process through OpenAI Agent
-            prompt = self._build_agent_prompt(session)
-            await self._process_with_openai_agent(session_id, prompt)
+            # Create operation context and process through pipeline
+            operation_context = self._create_operation_context(session)
+            generation_results = await self.pipeline.process_operation(operation_context)
+
+            # Store the generated tool requirements in the session
+            if generation_results:
+                await self._store_tool_specs(session_id, generation_results)
 
             # Mark session as completed
             await self._update_session_status(session_id, SessionStatus.COMPLETED)
@@ -237,139 +244,86 @@ class SessionService:
             if session_id in self.active_workflows:
                 del self.active_workflows[session_id]
 
-    def _build_agent_prompt(self, session: Session) -> str:
+    def _create_operation_context(self, session: Session) -> OperationContext:
         """
-        Build agent prompt from session tool requirements.
+        Create operation context from session data.
 
         Args:
             session: Session with tool requirements
 
         Returns:
-            str: Formatted prompt for the agent
+            OperationContext: Context for pipeline processing
         """
         if session.operation_type == "generate":
-            requirements = session.tool_requirements
-            prompt = f"Generate {len(requirements)} chemistry computation tools based on these requirements:\n\nTool Requirements:\n"
-            for i, req in enumerate(requirements, 1):
-                # Convert dict to UserToolRequirement if needed
+            # Convert dict requirements to UserToolRequirement objects
+            tools = []
+            for req in session.tool_requirements:
                 if isinstance(req, dict):
-                    req_obj = UserToolRequirement(**req)
+                    tools.append(UserToolRequirement(**req))
                 else:
-                    req_obj = req
-                prompt += f"""
-{i}. Description: {req_obj.description}
-   Input: {req_obj.input}
-   Output: {req_obj.output}
-"""
-        else:  # update
-            requirements = session.update_requirements
-            prompt = f"Update existing tools based on these requirements:\n\n"
-            prompt += f"Base Job ID: {session.base_job_id}\n"
-            prompt += "Update Requirements:\n"
-            for i, req in enumerate(requirements, 1):
-                # Convert dict to UserToolRequirement if needed
-                if isinstance(req, dict):
-                    req_obj = UserToolRequirement(**req)
-                else:
-                    req_obj = req
-                prompt += f"""
-{i}. Description: {req_obj.description}
-   Input: {req_obj.input}
-   Output: {req_obj.output}
-"""
-        return prompt
+                    tools.append(req)
 
-    async def _process_with_openai_agent(self, session_id: str, requirement: str):
-        """Process requirement using OpenAI Agent SDK."""
-        logger.info(f"Processing requirement with OpenAI Agent for session {session_id}")
-        await self._update_session_status(session_id, SessionStatus.IMPLEMENTING)
-
-        try:
-            # Use OpenAI Agent to process the requirement
-            async def progress_callback(progress):
-                await self._notify_agent_progress(session_id, progress)
-
-            result = await self.agent_manager.process_requirement(
-                session_id=session_id,
-                requirement=requirement,
-                progress_callback=progress_callback
+            return OperationContext.create_implement_operation(
+                session_id=session.id,
+                tools=tools,
+                metadata={"job_id": session.job_id}
             )
 
-            if result["success"]:
-                logger.info(f"Successfully processed requirement for session {session_id}")
+        elif session.operation_type == "update":
+            # Convert dict requirements to UserToolRequirement objects
+            raise NotImplementedError()
+        else:
+            raise ValueError(f"Unsupported operation type: {session.operation_type}")
 
-                # Extract and store any generated tools
-                await self._process_agent_tool_results(session_id, result)
+    async def _store_tool_specs(self, session_id: str, tool_generation_results: List[ToolGenerationResult]) -> None:
+        """
+        Store generated tool requirements in the session.
 
-                await self._notify_session_update(session_id, {
-                    "type": "processing-completed",
-                    "session_id": session_id,
-                    "messages": result.get("messages", []),
-                    "run_id": result.get("run_id")
-                })
-            else:
-                logger.error(f"Failed to process requirement for session {session_id}: {result['error']}")
-                raise RuntimeError(f"Agent processing failed: {result['error']}")
+        Args:
+            session_id: Session ID
+            tool_generation_results: List of ToolRequirement objects
+        """
+        try:
+            tools_created = []
+            # Convert ToolRequirement objects to ToolSpec objects for storage
+            for tool_res in tool_generation_results:
+                # Create ToolSpec from ToolGenerationResult
+                # read content from file
+                file_path = os.path.join(self.settings.tools_dir, tool_res.file_name)
+                with open(file_path, "r") as file:
+                    tool_code = file.read()
+
+
+                tool_spec = ToolSpec(
+                    session_id=session_id,
+                    name=tool_res.name,
+                    file_name=tool_res.file_name,
+                    code=tool_code,
+                    description=tool_res.description,
+                    input_schema={spec.name: spec for spec in tool_res.input_schema},
+                    output_schema=tool_res.output_schema,
+                    status="implemented",
+                    registered=False
+                )
+
+                # Add to session's generated_tools
+                await self.session_repo.add_generated_tool(session_id, tool_spec)
+                tools_created.append(tool_res.name)
+
+            logger.info(f"Stored {len(tool_generation_results)} tools for session {session_id}")
 
         except Exception as e:
-            logger.error(f"Error in OpenAI agent processing for session {session_id}: {e}")
+            logger.error(f"Error storing tool requirements for session {session_id}: {e}")
             raise
 
-    async def _process_agent_tool_results(self, session_id: str, agent_result: Dict[str, Any]):
-        """Process tool generation results from the agent and store them in the session."""
-        try:
-            # Get the agent's conversation to extract tool execution results
-            thread_id = self.agent_manager.active_threads.get(session_id)
-            if not thread_id:
-                logger.warning(f"No thread found for session {session_id}, cannot extract tool results")
-                return
-
-            # The agent manager should provide tool results in the result
-            tool_results = agent_result.get("tool_results", [])
-            tools_created = []
-
-            for tool_result in tool_results:
-                if tool_result.get("success") and tool_result.get("individual_tool"):
-                    # Create tool spec from the result
-
-                    tool_name = tool_result.get("tool_name")
-                    output_file = tool_result.get("output_file")
-
-                    if tool_name and output_file:
-                        try:
-                            # Read generated code
-                            with open(output_file, 'r') as f:
-                                tool_code = f.read()
-
-                            tool_spec = ToolSpec(
-                                session_id=session_id,
-                                name=tool_name,
-                                file_name=f"{tool_name}.py",
-                                description=f"Generated chemistry tool: {tool_name}",
-                                code=tool_code,
-                                input_schema={},
-                                output_schema={}
-                            )
-
-                            # Add tool to session's generated_tools list
-                            await self.session_repo.add_generated_tool(session_id, tool_spec)
-                            tools_created.append(tool_name)
-
-                        except Exception as e:
-                            logger.error(f"Failed to process tool result for {tool_name}: {e}")
-
-            if tools_created:
-                logger.info(f"Added {len(tools_created)} tools to session {session_id}: {tools_created}")
-                await self._notify_session_update(session_id, {
-                    "type": "tools-generated",
-                    "session_id": session_id,
-                    "tool_names": tools_created,
-                    "tool_count": len(tools_created)
-                })
-
-        except Exception as e:
-            logger.error(f"Error processing agent tool results for session {session_id}: {e}")
-
+        if tools_created:
+            logger.info(f"Added {len(tools_created)} tools to session {session_id}: {tools_created}")
+            await self._notify_session_update(session_id, {
+                "type": "tools-generated",
+                "session_id": session_id,
+                "tool_names": tools_created,
+                "tool_count": len(tools_created)
+            })
 
     async def _update_session_status(self, session_id: str, status: SessionStatus, error_message: Optional[str] = None):
         """Update session status and notify via WebSocket."""

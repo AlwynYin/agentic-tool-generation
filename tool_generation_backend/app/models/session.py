@@ -7,7 +7,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Literal
 
-from pydantic import Field
+from pydantic import Field, BaseModel
 
 from .base import DatabaseModel, BaseModelConfig
 from .job import UserToolRequirement
@@ -24,49 +24,38 @@ class SessionStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
 
-    @staticmethod
-    def from_string(s: str) -> "SessionStatus":
-        if s.lower() == "pending":
-            return SessionStatus.PENDING
-        elif s.lower() == "planning":
-            return SessionStatus.PLANNING
-        elif s.lower() == "searching":
-            return SessionStatus.SEARCHING
-        elif s.lower() == "implementing":
-            return SessionStatus.IMPLEMENTING
-        elif s.lower() == "executing":
-            return SessionStatus.EXECUTING
-        elif s.lower() == "completed":
-            return SessionStatus.COMPLETED
-        elif s.lower() == "failed":
-            return SessionStatus.FAILED
-        else:
-            raise ValueError(f"Unknown session status: {s}")
 
+class ParameterSpec(BaseModel):
+    """Specification of a parameter used by a function."""
+    name: str
+    type: str
+    description: str
+
+class OutputSpec(BaseModel):
+    """Specification of a parameter used by a function."""
+    type: str
+    description: str
 
 class ToolRequirement(BaseModelConfig):
     """Tool requirement specification from orchestrator agent."""
 
     name: str = Field(description="Tool name")
     description: str = Field(description="Tool description")
-    input_format: Dict[str, Any] = Field(
-        description="JSON schema for tool inputs"
+    input_format: List[ParameterSpec] = Field(
+        description="Schema of tool inputs"
     )
-    output_format: Dict[str, Any] = Field(
-        description="JSON schema for tool outputs"
+    output_format: OutputSpec = Field(
+        description="Schema of tool outputs"
     )
     required_apis: List[str] = Field(
         default_factory=list,
         description="API functions needed for this tool"
     )
-    priority: int = Field(
-        default=1,
-        description="Tool implementation priority"
-    )
 
 
 class ImplementationPlan(DatabaseModel):
-    """Implementation plan from orchestrator agent."""
+    """Implementation plan from orchestrator agent.
+    NOT USED CURRENTLY"""
 
     session_id: str = Field(description="Associated session ID")
     tool_requirements: List[ToolRequirement] = Field(
@@ -84,7 +73,8 @@ class ImplementationPlan(DatabaseModel):
 
 
 class SearchTarget(BaseModelConfig):
-    """Search target for browser agent."""
+    """Search target for browser agent.
+    NOT USED CURRENTLY"""
 
     package: str = Field(description="Package name to search")
     urls: List[str] = Field(
@@ -102,7 +92,8 @@ class SearchTarget(BaseModelConfig):
 
 
 class SearchPlan(DatabaseModel):
-    """Search plan for browser agent."""
+    """Search plan for browser agent.
+    NOT USED CURRENTLY"""
 
     session_id: str = Field(description="Associated session ID")
     search_targets: List[SearchTarget] = Field(
@@ -116,7 +107,8 @@ class SearchPlan(DatabaseModel):
 
 
 class ApiSpec(DatabaseModel):
-    """API specification extracted by browser agent."""
+    """API specification extracted by browser agent.
+    NOT USED CURRENTLY"""
 
     session_id: str = Field(description="Associated session ID")
     package: str = Field(description="Package name")
@@ -146,11 +138,40 @@ class ToolSpec(DatabaseModel):
     file_name: str = Field(description="Python file name")
     description: str = Field(description="Tool description")
     code: str = Field(description="Generated Python code")
-    input_schema: Dict[str, Any] = Field(
+    input_schema: Dict[str, ParameterSpec] = Field(
         default_factory=dict,
         description="Input validation schema"
     )
-    output_schema: Dict[str, Any] = Field(
+    output_schema: OutputSpec = Field(
+        description="Output schema"
+    )
+    dependencies: List[str] = Field(
+        default_factory=list,
+        description="Required Python packages"
+    )
+    status: str = Field(
+        default="pending",
+        description="Tool status: pending, implemented, tested, failed"
+    )
+    registered: bool = Field(
+        default=False,
+        description="Whether registered with SimpleTooling"
+    )
+
+
+class ToolGenerationResult(BaseModel):
+    """Tool generation result returned by implementation agent.
+       it contains all the necessary field of a ToolSpec, except for code, status, registered
+    """
+    success: bool = Field(description="Tool generation")
+    name: str = Field(description="Tool name")
+    file_name: str = Field(description="Python file name")
+    description: str = Field(description="Tool description")
+    input_schema: List[ParameterSpec] = Field(
+        default_factory=list,
+        description="Input schema"
+    )
+    output_schema: OutputSpec = Field(
         default_factory=dict,
         description="Output schema"
     )
@@ -158,23 +179,6 @@ class ToolSpec(DatabaseModel):
         default_factory=list,
         description="Required Python packages"
     )
-    test_cases: List[Dict[str, Any]] = Field(
-        default_factory=list,
-        description="Generated test cases"
-    )
-    status: str = Field(
-        default="pending",
-        description="Tool status: pending, implemented, tested, failed"
-    )
-    endpoint: Optional[str] = Field(
-        default=None,
-        description="SimpleTooling HTTP endpoint URL"
-    )
-    registered: bool = Field(
-        default=False,
-        description="Whether registered with SimpleTooling"
-    )
-
 
 class ExecutionResult(DatabaseModel):
     """Tool execution result."""
@@ -218,18 +222,6 @@ class Session(DatabaseModel):
     )
 
     # For update operations
-    base_job_id: Optional[str] = Field(
-        default=None,
-        description="Reference to job being updated"
-    )
-    base_tool_specs: List[ToolSpec] = Field(
-        default_factory=list,
-        description="Existing tool specs from base job (for context)"
-    )
-    update_requirements: List[UserToolRequirement] = Field(
-        default_factory=list,
-        description="Requirements for tool updates"
-    )
 
     status: SessionStatus = Field(
         default=SessionStatus.PENDING,
@@ -242,12 +234,6 @@ class Session(DatabaseModel):
     error_message: Optional[str] = Field(
         default=None,
         description="Error message if session failed"
-    )
-
-    # OpenAI thread tracking
-    thread_id: Optional[str] = Field(
-        default=None,
-        description="OpenAI thread ID for agent interaction"
     )
 
 

@@ -45,25 +45,9 @@ async def submit_tool_generation_job(
         # Generate job ID
         job_id = f"job_{uuid.uuid4().hex[:8]}"
         client_id = request.metadata.clientId if request.metadata else "unknown"
-        session_id_meta = request.metadata.sessionId if request.metadata else None
+        # session_id_meta = request.metadata.sessionId if request.metadata else None
 
         logger.info(f"Received tool generation job {job_id} from client {client_id}: {len(request.toolRequirements)} tools")
-
-        # requirement_prompt = f"""
-        # Generate {len(request.userToolRequirements)} chemistry computation tools based on these requirements:
-        #
-        # Tool Requirements:
-        # """
-        # for i, req in enumerate(request.userToolRequirements, 1):
-        #     requirement_prompt += f"""
-        # {i}. Description: {req.description}
-        #    Input: {req.input}
-        #    Output: {req.output}
-        # """
-        #
-        # requirement_prompt += f"""
-        # Job ID: {job_id}
-        # Please analyze these requirements and create precise, individual tools with proper type specifications."""
 
         session_id = await session_service.create_session(
             job_id=job_id,
@@ -129,7 +113,7 @@ async def get_job_status(
         logger.info(f"Retrieved session {session.id} for job {jobId}")
 
         # Get detailed workflow status
-        workflow_status = session_service.get_workflow_status(session.id)
+        # workflow_status = session_service.get_workflow_status(session.id)
 
         # Handle status as either enum or string
         status_str = session.status.value if hasattr(session.status, 'value') else str(session.status)
