@@ -36,7 +36,7 @@ COPY . .
 RUN mkdir -p /app/tool_service/tools
 
 # Copy schema template for code generation
-COPY tool_service/tools/schema.txt /app/tool_service/tools/schema.txt
+COPY templates/tool_schema.txt /app/tool_service/tools/schema.txt
 
 # Create Codex config directory and add trusted project config
 RUN mkdir -p /root/.codex
