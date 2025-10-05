@@ -289,7 +289,7 @@ class SessionService:
             for tool_res in tool_generation_results:
                 # Create ToolSpec from ToolGenerationResult
                 # read content from file
-                file_path = os.path.join(self.settings.tools_dir, tool_res.file_name)
+                file_path = os.path.join(self.settings.tools_path, tool_res.file_name)
                 with open(file_path, "r") as file:
                     tool_code = file.read()
 

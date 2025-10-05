@@ -17,8 +17,8 @@ import json
 import time
 from typing import Dict, Any
 
-BASE_URL = "https://tool-generation-service.up.railway.app"
-# BASE_URL = "http://127.0.0.1:8000"
+# BASE_URL = "https://tool-generation-service.up.railway.app"
+BASE_URL = "http://127.0.0.1:8000"
 # BASE_URL = "http://100.116.240.11:8000"
 
 async def test_tool_generation_pipeline():

@@ -79,9 +79,7 @@ async def execute_codex_implement(requirement: ToolRequirement) -> Dict[str, Any
         settings = get_settings()
 
         # Get project root dynamically - go up 4 levels to reach agent-browser/
-        project_root = Path(__file__).parent.parent.parent.parent  # Go up to agent-browser root
-        tool_service_dir = project_root / settings.tool_service_dir
-        tools_dir = tool_service_dir / settings.tools_dir
+        tools_dir = Path(settings.tool_service_dir)
 
         # Ensure directories exist
         tools_dir.mkdir(parents=True, exist_ok=True)
@@ -94,7 +92,7 @@ async def execute_codex_implement(requirement: ToolRequirement) -> Dict[str, Any
             "codex", "exec",
             "--model", "gpt-5",
             "--dangerously-bypass-approvals-and-sandbox",
-            "--cd", str(tool_service_dir),
+            "--cd", str(tools_dir),
             prompt
         ]
 
@@ -270,7 +268,6 @@ async def _run_codex_command(cmd: List[str], timeout: int = 120) -> Dict[str, An
                     "stdout": "",
                     "stderr": ""
                 }
-        codex_cwd = Path(settings.tools_dir)
 
         # Set OPENAI_API_KEY environment variable if not set
         env = os.environ.copy()
@@ -282,8 +279,7 @@ async def _run_codex_command(cmd: List[str], timeout: int = 120) -> Dict[str, An
             *cmd_with_path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env=env,
-            cwd=codex_cwd
+            env=env
         )
 
         try:
