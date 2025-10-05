@@ -32,8 +32,11 @@ RUN uv sync --frozen
 # Copy application code
 COPY . .
 
-# Clone simpletooling template repo into tool_service directory
-RUN git clone https://github.com/EvoEvolver/simpletooling_template.git /app/tool_service
+# Create tool_service directory structure
+RUN mkdir -p /app/tool_service/tools
+
+# Copy schema template for code generation
+COPY tool_service/tools/schema.txt /app/tool_service/tools/schema.txt
 
 # Create Codex config directory and add trusted project config
 RUN mkdir -p /root/.codex

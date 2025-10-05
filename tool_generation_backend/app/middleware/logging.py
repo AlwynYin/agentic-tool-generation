@@ -3,6 +3,7 @@ Logging middleware for request/response tracking.
 """
 
 import logging
+import sys
 import time
 from typing import Callable
 
@@ -42,11 +43,16 @@ def setup_logging_middleware(app: FastAPI, settings: Settings) -> None:
     """Setup logging middleware for the FastAPI application."""
     app.add_middleware(LoggingMiddleware)
 
-    # Configure logging format
+    # Configure logging to use stdout (Railway compatibility)
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    ))
+
     logging.basicConfig(
         level=getattr(logging, settings.log_level.upper()),
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S"
+        handlers=[handler]
     )
 
     # Suppress verbose third-party loggers
