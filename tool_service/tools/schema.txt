@@ -1,0 +1,89 @@
+"""
+Tool for [TOOL_DESCRIPTION]
+Generated for chemistry agent capabilities.
+"""
+
+import numpy as np
+import pandas as pd
+from typing import Union, List, Dict, Any, Optional
+import json
+
+
+def [MAIN_FUNCTION_NAME](
+    [PARAMETER_1]: [TYPE_HINT],
+    [PARAMETER_2]: [TYPE_HINT] = [DEFAULT_VALUE],
+    **kwargs
+) -> [RETURN_TYPE]:
+    """
+    [DETAILED_FUNCTION_DESCRIPTION]
+
+    Args:
+        [PARAMETER_1]: [Description of parameter 1]
+        [PARAMETER_2]: [Description of parameter 2] (default: [DEFAULT_VALUE])
+        **kwargs: Additional parameters
+
+    Returns:
+        [RETURN_TYPE]: [Description of what is returned]
+
+    Raises:
+        ValueError: [Description of when this is raised]
+        TypeError: [Description of when this is raised]
+    """
+    try:
+        # Input validation
+        if not isinstance([PARAMETER_1], [EXPECTED_TYPE]):
+            raise TypeError(f"Expected {[EXPECTED_TYPE].__name__}, got
+{type([PARAMETER_1]).__name__}")
+
+        # Main logic here
+        result = {
+            "success": True,
+            "data": [COMPUTED_RESULT],
+            "metadata": {
+                "tool_name": "[TOOL_NAME]",
+                "parameters_used": {
+                    "[PARAMETER_1]": [PARAMETER_1],
+                    "[PARAMETER_2]": [PARAMETER_2]
+                }
+            }
+        }
+
+        return result
+
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": type(e).__name__
+        }
+
+
+def [HELPER_FUNCTION_NAME]([PARAMS]) -> [RETURN_TYPE]:
+    """
+    [Helper function description]
+    """
+    # Helper function implementation
+    pass
+
+
+# Example usage (this won't execute when imported)
+if __name__ == "__main__":
+    # Test the function
+    example_result = [MAIN_FUNCTION_NAME]([EXAMPLE_ARGS])
+    print(json.dumps(example_result, indent=2))
+
+## Key Requirements:
+
+1. Function Structure:
+  - Functions must NOT start with underscore (your system filters these out)
+  - Include comprehensive docstrings with Args, Returns, and Raises sections
+  - Use type hints for all parameters and return values
+
+2. Return Format:
+  - Always return a dictionary with "success" boolean
+  - Include error handling with structured error responses
+  - Provide metadata about the operation
+3. Execution Guard:
+  - Include if __name__ == "__main__": block for testing
+  - No code should execute at module level during import
+
