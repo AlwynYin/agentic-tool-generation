@@ -9,13 +9,16 @@ import subprocess
 import asyncio
 import logging
 import json
+import shutil
 import os
 from typing import Dict, Any, Optional, List
 from pathlib import Path
 
+from app.config import get_settings
 from app.models import ToolRequirement
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 
 def authenticate_codex(api_key: str) -> bool:
@@ -247,12 +250,10 @@ async def _run_codex_command(cmd: List[str], timeout: int = 120) -> Dict[str, An
     Returns:
         Dict with command result
     """
-    import os
     try:
         logger.debug(f"Running Codex command: {' '.join(cmd)}")
 
         # Check if codex executable exists
-        import shutil
         codex_path = shutil.which('codex')
         if not codex_path:
             logger.error("❌ Codex executable not found in PATH")
@@ -269,6 +270,7 @@ async def _run_codex_command(cmd: List[str], timeout: int = 120) -> Dict[str, An
                     "stdout": "",
                     "stderr": ""
                 }
+        codex_cwd = Path(settings.tools_dir)
 
         # Set OPENAI_API_KEY environment variable if not set
         env = os.environ.copy()
@@ -280,7 +282,8 @@ async def _run_codex_command(cmd: List[str], timeout: int = 120) -> Dict[str, An
             *cmd_with_path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env=env
+            env=env,
+            cwd=codex_cwd
         )
 
         try:
