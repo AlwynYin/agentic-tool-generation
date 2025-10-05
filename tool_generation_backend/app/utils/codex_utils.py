@@ -92,6 +92,7 @@ async def execute_codex_implement(requirement: ToolRequirement) -> Dict[str, Any
             "codex", "exec",
             "--model", "gpt-5",
             "--dangerously-bypass-approvals-and-sandbox",
+            "--skip-git-repo-check",
             "--cd", str(tools_dir),
             prompt
         ]
@@ -203,6 +204,7 @@ async def execute_codex_browse(
             "codex", "exec",
             "--model", "gpt-5",
             "--dangerously-bypass-approvals-and-sandbox",
+            "--skip-git-repo-check",
             "--cd", str(workspaces_dir),
             browse_prompt
         ]
