@@ -13,7 +13,6 @@ from datetime import datetime, timezone
 import agents
 from agents import Agent, Runner
 
-from app.models import ToolSpec
 from app.models.operation import OperationContext, ImplementRequirements, UpdateRequirements
 from app.models.session import ToolRequirement, ToolGenerationResult
 from app.memory.mongo_session import MongoSession

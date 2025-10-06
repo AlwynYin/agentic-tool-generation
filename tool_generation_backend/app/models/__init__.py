@@ -4,12 +4,6 @@ from .base import BaseModelConfig, TimestampedModel, DatabaseModel
 from .session import (
     SessionStatus,
     ToolRequirement,
-    ImplementationPlan,
-    SearchTarget,
-    SearchPlan,
-    ApiSpec,
-    ToolSpec,
-    ExecutionResult,
     Session,
     SessionCreate,
     SessionUpdate,
@@ -17,17 +11,16 @@ from .session import (
 )
 # Agent models removed - using OpenAI Agent SDK
 from .tool import (
+    Tool,
+    ToolStatus,
     ToolExecutionRequest,
     ToolExecutionResponse,
     ToolGenerationRequest,
     ToolGenerationResponse,
     ToolRegistrationRequest,
     ToolRegistrationResponse,
-    ToolMetadata,
     ToolListRequest,
     ToolListResponse,
-    BulkToolUploadRequest,
-    BulkToolUploadResponse,
 )
 
 __all__ = [
@@ -38,27 +31,20 @@ __all__ = [
     # Session models
     "SessionStatus",
     "ToolRequirement",
-    "ImplementationPlan",
-    "SearchTarget",
-    "SearchPlan",
-    "ApiSpec",
-    "ToolSpec",
-    "ExecutionResult",
     "Session",
     "SessionCreate",
     "SessionUpdate",
     "SessionResponse",
     # Agent models removed - using OpenAI Agent SDK
     # Tool models
+    "Tool",
+    "ToolStatus",
     "ToolExecutionRequest",
     "ToolExecutionResponse",
     "ToolGenerationRequest",
     "ToolGenerationResponse",
     "ToolRegistrationRequest",
     "ToolRegistrationResponse",
-    "ToolMetadata",
     "ToolListRequest",
     "ToolListResponse",
-    "BulkToolUploadRequest",
-    "BulkToolUploadResponse",
 ]

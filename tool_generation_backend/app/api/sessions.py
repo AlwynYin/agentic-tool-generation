@@ -9,10 +9,12 @@ import logging
 
 from app.models.session import (
     SessionCreate, SessionUpdate, SessionResponse, Session,
-    SessionStatus, ToolSpec
+    SessionStatus
 )
+from app.models.tool import Tool
 from app.services.session_service import SessionService
 from app.repositories.session_repository import SessionRepository
+from app.repositories.tool_repository import ToolRepository
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -25,10 +27,12 @@ async def get_session_service() -> SessionService:
     """Get session service instance with agent workflow."""
     # Initialize repositories
     session_repo = SessionRepository()
+    tool_repo = ToolRepository()
 
     # Create and return session service (OpenAI Agent SDK handled internally)
     return SessionService(
-        session_repo=session_repo
+        session_repo=session_repo,
+        tool_repo=tool_repo
     )
 
 
@@ -274,11 +278,11 @@ async def get_active_sessions(
         )
 
 
-# @router.get("/{session_id}/tools", response_model=List[ToolSpec])
+# @router.get("/{session_id}/tools", response_model=List[Tool])
 async def get_session_tools(
     session_id: str,
     session_service: SessionService = Depends(get_session_service)
-) -> List[ToolSpec]:
+) -> List[Tool]:
     """
     Get tools generated for a session.
 
@@ -287,7 +291,7 @@ async def get_session_tools(
         session_service: Session service instance
 
     Returns:
-        List[ToolSpec]: Session tools
+        List[Tool]: Session tools
     """
     # Check if session exists
     session = await session_service.get_session(session_id)
@@ -297,7 +301,8 @@ async def get_session_tools(
             detail=f"Session not found: {session_id}"
         )
 
-    return session.tools
+    # Get tools from tools collection
+    return await session_service.get_session_tools(session_id)
 
 
 # @router.get("/{session_id}/status")
@@ -330,7 +335,7 @@ async def get_session_status(
         "session_id": session_id,
         "status": session.status.value,
         "workflow_status": workflow_status,
-        "tools_count": len(session.tools),
+        "tools_count": len(session.tool_ids),
         "error_message": session.error_message,
         "created_at": session.created_at,
         "updated_at": session.updated_at

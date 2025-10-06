@@ -65,32 +65,17 @@ async def _create_indexes() -> None:
         return
 
     try:
-        # Sessions collection indexes
-        sessions_collection = _database["sessions"]
-        await sessions_collection.create_index("userId")
-        await sessions_collection.create_index("createdAt")
-        await sessions_collection.create_index("status")
-        await sessions_collection.create_index([("userId", 1), ("createdAt", -1)])
+        # Import repositories here to avoid circular imports
+        from app.repositories.session_repository import SessionRepository
+        from app.repositories.tool_repository import ToolRepository
 
-        # API specs collection indexes
-        api_specs_collection = _database["apiSpecs"]
-        await api_specs_collection.create_index("sessionId")
-        await api_specs_collection.create_index("package")
-        await api_specs_collection.create_index([("sessionId", 1), ("package", 1)])
+        # Create repository instances
+        session_repo = SessionRepository()
+        tool_repo = ToolRepository()
 
-        # Tools collection indexes
-        tools_collection = _database["tools"]
-        await tools_collection.create_index("sessionId")
-        await tools_collection.create_index("name")
-        await tools_collection.create_index("status")
-        await tools_collection.create_index([("sessionId", 1), ("name", 1)])
-
-        # Execution results collection indexes
-        execution_results_collection = _database["executionResults"]
-        await execution_results_collection.create_index("sessionId")
-        await execution_results_collection.create_index("toolId")
-        await execution_results_collection.create_index("createdAt")
-        await execution_results_collection.create_index([("sessionId", 1), ("toolId", 1)])
+        # Ensure indexes for each collection
+        await session_repo.ensure_indexes()
+        await tool_repo.ensure_indexes()
 
         logging.info("✅ All database indexes created successfully")
 

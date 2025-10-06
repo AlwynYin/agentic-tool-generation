@@ -6,72 +6,140 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 from bson import ObjectId
 import logging
+import os
 
 from .base import BaseRepository
-from app.models.tool import ToolMetadata, ToolFile
-from app.models.session import ToolSpec, ExecutionResult
+from app.models.tool import Tool, ToolStatus
+from app.models.session import ToolGenerationResult
 
 logger = logging.getLogger(__name__)
 
 
-class ToolRepository(BaseRepository[ToolMetadata]):
+class ToolRepository(BaseRepository[Tool]):
     """Repository for tool metadata and file management."""
 
     def __init__(self):
-        super().__init__(ToolMetadata, "tools")
+        super().__init__(Tool, "tools")
 
-    async def store_tool_metadata(self, tool_spec: ToolSpec, file_path: str, session_id: str) -> str:
+    async def get_by_name(self, name: str) -> Optional[Tool]:
         """
-        Store tool metadata from a generated tool specification.
+        Get tool by name for deduplication check.
 
         Args:
-            tool_spec: Tool specification from implementer agent
-            file_path: Path where tool file is stored
-            session_id: Associated session ID
+            name: Tool name
 
         Returns:
-            str: Created tool metadata ID
+            Optional[Tool]: Tool if found, None otherwise
         """
-        metadata = {
-            "name": tool_spec.name,
-            "file_name": tool_spec.file_name,
-            "description": tool_spec.description,
-            "file_path": file_path,
-            "session_id": session_id,
-            "input_schema": tool_spec.input_schema,
-            "output_schema": tool_spec.output_schema,
-            "dependencies": tool_spec.dependencies,
-            "test_cases": tool_spec.test_cases,
-            "status": tool_spec.status,
-            "endpoint": tool_spec.endpoint,
-            "registered": tool_spec.registered,
-            "version": "1.0.0",
-            "category": "generated"
-        }
+        try:
+            tools = await self.find_by_field("name", name, limit=1)
+            return tools[0] if tools else None
+        except Exception as e:
+            logger.error(f"Failed to get tool by name {name}: {e}")
+            return None
 
-        return await self.create(metadata)
-
-    async def update_registration_status(self, tool_id: str, endpoint: str, registered: bool = True) -> bool:
+    def _serialize_tool_data(
+        self,
+        result: ToolGenerationResult,
+        session_id: str,
+        file_path: str,
+        code: str
+    ) -> Dict[str, Any]:
         """
-        Update tool registration status and endpoint.
+        Serialize ToolGenerationResult to MongoDB-ready dictionary.
 
         Args:
-            tool_id: Tool metadata ID
-            endpoint: SimpleTooling endpoint URL
-            registered: Registration status
+            result: Tool generation result from agent
+            session_id: Session ID that generated this tool
+            file_path: Path where tool file is stored
+            code: Python code implementation
+
+        Returns:
+            Dict ready for MongoDB insertion
+        """
+        return {
+            "name": result.name,
+            "file_name": result.file_name,
+            "file_path": file_path,
+            "description": result.description,
+            "code": code,
+            "input_schema": {spec.name: spec.model_dump() for spec in result.input_schema},
+            "output_schema": result.output_schema.model_dump(),
+            "dependencies": result.dependencies,
+            "test_cases": [],  # Will be added later if needed
+            "status": ToolStatus.DRAFT.value,  # Serialize enum to string
+            "session_id": session_id
+        }
+
+    async def create_from_generation_result(
+        self,
+        result: ToolGenerationResult,
+        session_id: str,
+        file_path: str,
+        code: str
+    ) -> str:
+        """
+        Create a new tool from a generation result.
+
+        Args:
+            result: Tool generation result from agent
+            session_id: Session ID that generated this tool
+            file_path: Path where tool file is stored
+            code: Python code implementation
+
+        Returns:
+            str: Created tool ID
+        """
+        try:
+            tool_data = self._serialize_tool_data(result, session_id, file_path, code)
+            tool_id = await self.create(tool_data)
+            logger.info(f"Created tool {result.name} with ID {tool_id}")
+            return tool_id
+
+        except Exception as e:
+            logger.error(f"Failed to create tool from generation result: {e}")
+            raise
+
+    async def get_by_ids(self, tool_ids: List[str]) -> List[Tool]:
+        """
+        Get multiple tools by their IDs.
+
+        Args:
+            tool_ids: List of tool IDs
+
+        Returns:
+            List[Tool]: List of tools (may be shorter than input if some not found)
+        """
+        try:
+            tools = []
+            for tool_id in tool_ids:
+                tool = await self.get_by_id(tool_id)
+                if tool:
+                    tools.append(tool)
+            return tools
+        except Exception as e:
+            logger.error(f"Failed to get tools by IDs: {e}")
+            return []
+
+
+    async def update_status(self, tool_id: str, new_status: ToolStatus) -> bool:
+        """
+        Update tool status.
+
+        Args:
+            tool_id: Tool ID
+            new_status: New ToolStatus enum value
 
         Returns:
             bool: True if updated successfully
         """
         update_data = {
-            "registered": registered,
-            "endpoint": endpoint,
-            "status": "registered" if registered else "pending"
+            "status": new_status.value
         }
 
         return await self.update(tool_id, update_data)
 
-    async def get_tools_by_session(self, session_id: str) -> List[ToolMetadata]:
+    async def get_tools_by_session(self, session_id: str) -> List[Tool]:
         """
         Get all tools for a specific session.
 
@@ -79,11 +147,11 @@ class ToolRepository(BaseRepository[ToolMetadata]):
             session_id: Session ID
 
         Returns:
-            List[ToolMetadata]: Tools created in the session
+            List[Tool]: Tools created in the session
         """
         return await self.find_by_field("session_id", session_id)
 
-    async def get_registered_tools(self, limit: Optional[int] = None) -> List[ToolMetadata]:
+    async def get_registered_tools(self, limit: Optional[int] = None) -> List[Tool]:
         """
         Get all registered tools.
 
@@ -91,24 +159,24 @@ class ToolRepository(BaseRepository[ToolMetadata]):
             limit: Maximum number of tools to return
 
         Returns:
-            List[ToolMetadata]: Registered tools
+            List[Tool]: Registered tools
         """
-        return await self.find_by_field("registered", True, limit)
+        return await self.find_by_field("status", ToolStatus.REGISTERED.value, limit)
 
-    async def get_tools_by_category(self, category: str, limit: Optional[int] = None) -> List[ToolMetadata]:
+    async def get_tools_by_status(self, status: ToolStatus, limit: Optional[int] = None) -> List[Tool]:
         """
-        Get tools by category.
+        Get tools by status.
 
         Args:
-            category: Tool category (e.g., 'generated', 'custom', 'chemistry')
+            status: ToolStatus enum value
             limit: Maximum number of tools to return
 
         Returns:
-            List[ToolMetadata]: Tools in the specified category
+            List[Tool]: Tools with specified status
         """
-        return await self.find_by_field("category", category, limit)
+        return await self.find_by_field("status", status.value, limit)
 
-    async def search_tools(self, search_term: str, limit: int = 20) -> List[ToolMetadata]:
+    async def search_tools(self, search_term: str, limit: int = 20) -> List[Tool]:
         """
         Search tools by name or description.
 
@@ -117,7 +185,7 @@ class ToolRepository(BaseRepository[ToolMetadata]):
             limit: Maximum number of tools to return
 
         Returns:
-            List[ToolMetadata]: Matching tools
+            List[Tool]: Matching tools
         """
         try:
             # Create text search query
@@ -186,37 +254,26 @@ class ToolRepository(BaseRepository[ToolMetadata]):
             logger.error(f"Failed to get usage stats for tool {tool_id}: {e}")
             return {}
 
-    async def mark_tool_deprecated(self, tool_id: str, reason: str) -> bool:
+    async def mark_tool_deprecated(self, tool_id: str) -> bool:
         """
         Mark a tool as deprecated.
 
         Args:
-            tool_id: Tool metadata ID
-            reason: Reason for deprecation
+            tool_id: Tool ID
 
         Returns:
             bool: True if updated successfully
         """
-        update_data = {
-            "status": "deprecated",
-            "deprecated_at": datetime.now(timezone.utc),
-            "deprecation_reason": reason
-        }
-
-        return await self.update(tool_id, update_data)
+        return await self.update_status(tool_id, ToolStatus.DEPRECATED)
 
     async def ensure_indexes(self):
         """Create indexes for optimal query performance."""
         try:
+            # Unique index for name (deduplication)
+            await self.collection.create_index("name", unique=True)
+
             # Index for session queries
             await self.collection.create_index("session_id")
-
-            # Index for name and category queries
-            await self.collection.create_index("name")
-            await self.collection.create_index("category")
-
-            # Index for registration status
-            await self.collection.create_index("registered")
 
             # Index for status
             await self.collection.create_index("status")
@@ -227,91 +284,7 @@ class ToolRepository(BaseRepository[ToolMetadata]):
                 ("description", "text")
             ])
 
-            # Compound index for category + status queries
-            await self.collection.create_index([("category", 1), ("status", 1)])
-
             logger.info("Tool repository indexes created successfully")
 
         except Exception as e:
             logger.error(f"Failed to create tool repository indexes: {e}")
-
-
-class ExecutionResultRepository(BaseRepository[ExecutionResult]):
-    """Repository for tool execution results."""
-
-    def __init__(self):
-        super().__init__(ExecutionResult, "execution_results")
-
-    async def store_execution_result(self, result: ExecutionResult) -> str:
-        """
-        Store tool execution result.
-
-        Args:
-            result: Execution result data
-
-        Returns:
-            str: Created execution result ID
-        """
-        result_dict = result.model_dump()
-        return await self.create(result_dict)
-
-    async def get_results_by_session(self, session_id: str, limit: Optional[int] = None) -> List[ExecutionResult]:
-        """
-        Get execution results for a session.
-
-        Args:
-            session_id: Session ID
-            limit: Maximum number of results to return
-
-        Returns:
-            List[ExecutionResult]: Execution results
-        """
-        return await self.find_by_field("session_id", session_id, limit)
-
-    async def get_results_by_tool(self, tool_id: str, limit: Optional[int] = None) -> List[ExecutionResult]:
-        """
-        Get execution results for a specific tool.
-
-        Args:
-            tool_id: Tool ID
-            limit: Maximum number of results to return
-
-        Returns:
-            List[ExecutionResult]: Execution results
-        """
-        return await self.find_by_field("tool_id", tool_id, limit)
-
-    async def get_failed_executions(self, limit: Optional[int] = None) -> List[ExecutionResult]:
-        """
-        Get failed execution results for debugging.
-
-        Args:
-            limit: Maximum number of results to return
-
-        Returns:
-            List[ExecutionResult]: Failed execution results
-        """
-        return await self.find_by_field("success", False, limit)
-
-    async def ensure_indexes(self):
-        """Create indexes for optimal query performance."""
-        try:
-            # Index for session queries
-            await self.collection.create_index("session_id")
-
-            # Index for tool queries
-            await self.collection.create_index("tool_id")
-
-            # Index for success status
-            await self.collection.create_index("success")
-
-            # Compound index for tool + success queries
-            await self.collection.create_index([("tool_id", 1), ("success", 1)])
-
-            # Index for created_at for sorting
-            await self.collection.create_index("created_at")
-
-            logger.info("Execution result repository indexes created successfully")
-
-        except Exception as e:
-            logger.error(f"Failed to create execution result repository indexes: {e}")

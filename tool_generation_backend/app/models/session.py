@@ -31,10 +31,12 @@ class ParameterSpec(BaseModel):
     type: str
     description: str
 
+
 class OutputSpec(BaseModel):
     """Specification of a parameter used by a function."""
     type: str
     description: str
+
 
 class ToolRequirement(BaseModelConfig):
     """Tool requirement specification from orchestrator agent."""
@@ -50,112 +52,6 @@ class ToolRequirement(BaseModelConfig):
     required_apis: List[str] = Field(
         default_factory=list,
         description="API functions needed for this tool"
-    )
-
-
-class ImplementationPlan(DatabaseModel):
-    """Implementation plan from orchestrator agent.
-    NOT USED CURRENTLY"""
-
-    session_id: str = Field(description="Associated session ID")
-    tool_requirements: List[ToolRequirement] = Field(
-        default_factory=list,
-        description="List of tools to implement"
-    )
-    estimated_complexity: str = Field(
-        default="medium",
-        description="Estimated implementation complexity: low, medium, high"
-    )
-    dependencies: List[str] = Field(
-        default_factory=list,
-        description="Required packages/libraries"
-    )
-
-
-class SearchTarget(BaseModelConfig):
-    """Search target for browser agent.
-    NOT USED CURRENTLY"""
-
-    package: str = Field(description="Package name to search")
-    urls: List[str] = Field(
-        default_factory=list,
-        description="URLs to search for documentation"
-    )
-    keywords: List[str] = Field(
-        default_factory=list,
-        description="Keywords to search for"
-    )
-    priority: int = Field(
-        default=1,
-        description="Search priority"
-    )
-
-
-class SearchPlan(DatabaseModel):
-    """Search plan for browser agent.
-    NOT USED CURRENTLY"""
-
-    session_id: str = Field(description="Associated session ID")
-    search_targets: List[SearchTarget] = Field(
-        default_factory=list,
-        description="List of packages/APIs to search"
-    )
-    max_concurrent_searches: int = Field(
-        default=8,
-        description="Maximum concurrent search tasks"
-    )
-
-
-class ApiSpec(DatabaseModel):
-    """API specification extracted by browser agent.
-    NOT USED CURRENTLY"""
-
-    session_id: str = Field(description="Associated session ID")
-    package: str = Field(description="Package name")
-    module: str = Field(description="Module name")
-    function_name: str = Field(description="Function name")
-    description: str = Field(description="Function description")
-    parameters: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Function parameters schema"
-    )
-    returns: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Function return value schema"
-    )
-    examples: List[str] = Field(
-        default_factory=list,
-        description="Usage examples"
-    )
-    source_url: str = Field(description="Source documentation URL")
-
-
-class ToolSpec(DatabaseModel):
-    """Generated tool specification from implementer agent."""
-
-    session_id: str = Field(description="Associated session ID")
-    name: str = Field(description="Tool name")
-    file_name: str = Field(description="Python file name")
-    description: str = Field(description="Tool description")
-    code: str = Field(description="Generated Python code")
-    input_schema: Dict[str, ParameterSpec] = Field(
-        default_factory=dict,
-        description="Input validation schema"
-    )
-    output_schema: OutputSpec = Field(
-        description="Output schema"
-    )
-    dependencies: List[str] = Field(
-        default_factory=list,
-        description="Required Python packages"
-    )
-    status: str = Field(
-        default="pending",
-        description="Tool status: pending, implemented, tested, failed"
-    )
-    registered: bool = Field(
-        default=False,
-        description="Whether registered with SimpleTooling"
     )
 
 
@@ -178,30 +74,6 @@ class ToolGenerationResult(BaseModel):
     dependencies: List[str] = Field(
         default_factory=list,
         description="Required Python packages"
-    )
-
-class ExecutionResult(DatabaseModel):
-    """Tool execution result."""
-
-    session_id: str = Field(description="Associated session ID")
-    tool_id: str = Field(description="Tool ID that was executed")
-    tool_name: str = Field(description="Tool name")
-    inputs: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Tool execution inputs"
-    )
-    outputs: Optional[Dict[str, Any]] = Field(
-        default=None,
-        description="Tool execution outputs"
-    )
-    success: bool = Field(description="Whether execution was successful")
-    error_message: Optional[str] = Field(
-        default=None,
-        description="Error message if execution failed"
-    )
-    execution_time_ms: Optional[float] = Field(
-        default=None,
-        description="Execution time in milliseconds"
     )
 
 
@@ -227,10 +99,13 @@ class Session(DatabaseModel):
         default=SessionStatus.PENDING,
         description="Current workflow status"
     )
-    generated_tools: List[ToolSpec] = Field(
+
+    # Tool references (stored in separate tools collection)
+    tool_ids: List[str] = Field(
         default_factory=list,
-        description="Generated or updated tools"
+        description="IDs of tools in the tools collection"
     )
+
     error_message: Optional[str] = Field(
         default=None,
         description="Error message if session failed"

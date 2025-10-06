@@ -5,17 +5,18 @@ Session service for workflow orchestration and management.
 import asyncio
 import logging
 import os
-from xml.dom.domreg import registered
 
-from typing import Optional, Dict, Any, Callable, List
+from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
 
 from app.models.session import (
-    SessionUpdate, SessionStatus, Session, ToolSpec, ToolGenerationResult
+    SessionUpdate, SessionStatus, Session, ToolGenerationResult
 )
+from app.models.tool import Tool
 from app.models.job import UserToolRequirement
 from app.models.operation import OperationContext
 from app.repositories.session_repository import SessionRepository
+from app.repositories.tool_repository import ToolRepository
 from app.agents.pipeline import ToolGenerationPipeline
 from app.config import get_settings
 
@@ -28,6 +29,7 @@ class SessionService:
     def __init__(
         self,
         session_repo: SessionRepository,
+        tool_repo: ToolRepository,
         websocket_manager: Optional[Any] = None
     ):
         """
@@ -35,9 +37,11 @@ class SessionService:
 
         Args:
             session_repo: Session repository
+            tool_repo: Tool repository for deduplication
             websocket_manager: WebSocket manager for real-time updates
         """
         self.session_repo = session_repo
+        self.tool_repo = tool_repo
 
         # Initialize Chemistry Tool Pipeline
         self.pipeline = ToolGenerationPipeline()
@@ -146,6 +150,34 @@ class SessionService:
             list[Session]: User's sessions
         """
         return await self.session_repo.get_sessions_by_user(user_id, limit)
+
+    async def get_session_tools(self, session_id: str) -> List[Tool]:
+        """
+        Get tools for a session from the tools collection.
+
+        Args:
+            session_id: Session ID
+
+        Returns:
+            List[Tool]: Tools associated with the session
+        """
+        try:
+            session = await self.session_repo.get_by_id(session_id)
+            if not session:
+                logger.warning(f"Session not found: {session_id}")
+                return []
+
+            # Get tools from tools collection using tool_ids
+            if session.tool_ids:
+                tools = await self.tool_repo.get_by_ids(session.tool_ids)
+                return tools
+            else:
+                logger.info(f"No tool_ids for session {session_id}")
+                return []
+
+        except Exception as e:
+            logger.error(f"Error getting tools for session {session_id}: {e}")
+            return []
 
     async def get_active_sessions(self, limit: Optional[int] = None) -> list[Session]:
         """
@@ -277,52 +309,58 @@ class SessionService:
 
     async def _store_tool_specs(self, session_id: str, tool_generation_results: List[ToolGenerationResult]) -> None:
         """
-        Store generated tool requirements in the session.
+        Store generated tools in tools collection with deduplication.
 
         Args:
             session_id: Session ID
-            tool_generation_results: List of ToolRequirement objects
+            tool_generation_results: List of ToolGenerationResult objects
         """
         try:
-            tools_created = []
-            # Convert ToolRequirement objects to ToolSpec objects for storage
+            tools_processed = []
+            tool_ids = []
+
             for tool_res in tool_generation_results:
-                # Create ToolSpec from ToolGenerationResult
-                # read content from file
+                # Read generated code from file
                 file_path = os.path.join(self.settings.tools_path, tool_res.file_name)
                 with open(file_path, "r") as file:
                     tool_code = file.read()
 
+                # Check if tool already exists (deduplication)
+                existing_tool = await self.tool_repo.get_by_name(tool_res.name)
 
-                tool_spec = ToolSpec(
-                    session_id=session_id,
-                    name=tool_res.name,
-                    file_name=tool_res.file_name,
-                    code=tool_code,
-                    description=tool_res.description,
-                    input_schema={spec.name: spec for spec in tool_res.input_schema},
-                    output_schema=tool_res.output_schema,
-                    status="implemented",
-                    registered=False
-                )
+                if existing_tool:
+                    # Tool exists - update session_id to current session
+                    logger.info(f"Tool {tool_res.name} already exists (ID: {existing_tool.id}), updating session_id")
+                    await self.tool_repo.update(existing_tool.id, {"session_id": session_id})
+                    tool_id = existing_tool.id
+                else:
+                    # Create new tool in tools collection
+                    logger.info(f"Creating new tool {tool_res.name}")
+                    tool_id = await self.tool_repo.create_from_generation_result(
+                        result=tool_res,
+                        session_id=session_id,
+                        file_path=file_path,
+                        code=tool_code
+                    )
 
-                # Add to session's generated_tools
-                await self.session_repo.add_generated_tool(session_id, tool_spec)
-                tools_created.append(tool_res.name)
+                # Add tool ID to session
+                await self.session_repo.add_tool_id(session_id, tool_id)
+                tool_ids.append(tool_id)
+                tools_processed.append(tool_res.name)
 
             logger.info(f"Stored {len(tool_generation_results)} tools for session {session_id}")
 
         except Exception as e:
-            logger.error(f"Error storing tool requirements for session {session_id}: {e}")
+            logger.error(f"Error storing tool specs for session {session_id}: {e}")
             raise
 
-        if tools_created:
-            logger.info(f"Added {len(tools_created)} tools to session {session_id}: {tools_created}")
+        if tools_processed:
+            logger.info(f"Processed {len(tools_processed)} tools for session {session_id}: {tools_processed}")
             await self._notify_session_update(session_id, {
                 "type": "tools-generated",
                 "session_id": session_id,
-                "tool_names": tools_created,
-                "tool_count": len(tools_created)
+                "tool_names": tools_processed,
+                "tool_count": len(tools_processed)
             })
 
     async def _update_session_status(self, session_id: str, status: SessionStatus, error_message: Optional[str] = None):

@@ -9,7 +9,7 @@ import logging
 
 from .base import BaseRepository
 from app.models.session import (
-    Session, SessionStatus, ToolSpec, ImplementationPlan, SearchPlan, ApiSpec
+    Session, SessionStatus
 )
 
 logger = logging.getLogger(__name__)
@@ -127,87 +127,35 @@ class SessionRepository(BaseRepository[Session]):
     #     api_specs_dicts = [spec.model_dump() for spec in api_specs]
     #     return await self.update(session_id, {"api_specs": api_specs_dicts})
 
-    async def add_generated_tool(self, session_id: str, tool: ToolSpec) -> bool:
+    async def add_tool_id(self, session_id: str, tool_id: str) -> bool:
         """
-        Add a generated tool to session's generated_tools list.
+        Add a tool ID to session's tool_ids list.
 
         Args:
             session_id: Session ID
-            tool: Tool specification
+            tool_id: Tool ID to add
 
         Returns:
             bool: True if added successfully
         """
         try:
-            tool_dict = tool.model_dump()
-
             # Use MongoDB array push operation
             result = await self.collection.update_one(
                 {"_id": ObjectId(session_id)},
-                {"$push": {"generated_tools": tool_dict}}
+                {"$push": {"tool_ids": tool_id}}
             )
 
             success = result.modified_count > 0
             if success:
-                logger.info(f"Added generated tool to session {session_id}: {tool.name}")
+                logger.info(f"Added tool ID to session {session_id}: {tool_id}")
 
             return success
 
         except Exception as e:
-            logger.error(f"Failed to add generated tool to session {session_id}: {e}")
+            logger.error(f"Failed to add tool ID to session {session_id}: {e}")
             return False
 
-    async def store_tools(self, session_id: str, tools: List[ToolSpec]) -> bool:
-        """
-        Store multiple generated tools from implementer agent.
 
-        Args:
-            session_id: Session ID
-            tools: List of tool specifications
-
-        Returns:
-            bool: True if stored successfully
-        """
-        tools_dicts = [tool.model_dump() for tool in tools]
-        return await self.update(session_id, {"tools": tools_dicts})
-
-    async def update_tool_registration(self, session_id: str, tool_name: str, endpoint: str) -> bool:
-        """
-        Update tool registration status and endpoint.
-
-        Args:
-            session_id: Session ID
-            tool_name: Name of the tool that was registered
-            endpoint: SimpleTooling endpoint URL
-
-        Returns:
-            bool: True if updated successfully
-        """
-        try:
-            # Update tool in the tools array
-            result = await self.collection.update_one(
-                {
-                    "_id": ObjectId(session_id),
-                    "tools.name": tool_name
-                },
-                {
-                    "$set": {
-                        "tools.$.registered": True,
-                        "tools.$.endpoint": endpoint,
-                        "tools.$.status": "registered"
-                    }
-                }
-            )
-
-            success = result.modified_count > 0
-            if success:
-                logger.info(f"Updated tool registration for session {session_id}, tool {tool_name}")
-
-            return success
-
-        except Exception as e:
-            logger.error(f"Failed to update tool registration for session {session_id}, tool {tool_name}: {e}")
-            return False
 
     async def get_sessions_by_user(self, user_id: str, limit: int = 50) -> List[Session]:
         """

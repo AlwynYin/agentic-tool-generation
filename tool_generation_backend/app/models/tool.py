@@ -3,10 +3,54 @@ Tool-related Pydantic models for tool execution and management.
 """
 
 from typing import Any, Dict, List, Optional
+from enum import Enum
 
 from pydantic import Field
 
 from .base import BaseModelConfig, DatabaseModel
+from .session import ParameterSpec, OutputSpec
+
+
+class ToolStatus(str, Enum):
+    """Tool status enumeration."""
+    DRAFT = "draft"              # Just generated, not tested
+    REGISTERED = "registered"    # Ready for use
+    DEPRECATED = "deprecated"    # Old/replaced version
+    FAILED = "failed"           # Generation/testing failed
+
+
+class Tool(DatabaseModel):
+    """
+    Unified tool model for storage and management.
+    Consolidates ToolSpec and ToolMetadata into single source of truth.
+    """
+    name: str = Field(description="Tool name (unique identifier)")
+    file_name: str = Field(description="Python file name")
+    file_path: str = Field(description="Full file path")
+    description: str = Field(description="Tool description")
+    code: str = Field(description="Python code implementation")
+    input_schema: Dict[str, ParameterSpec] = Field(
+        default_factory=dict,
+        description="Input validation schema"
+    )
+    output_schema: OutputSpec = Field(
+        description="Output schema"
+    )
+    dependencies: List[str] = Field(
+        default_factory=list,
+        description="Required Python packages"
+    )
+    test_cases: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Test cases for the tool"
+    )
+    status: ToolStatus = Field(
+        default=ToolStatus.DRAFT,
+        description="Tool status"
+    )
+    session_id: str = Field(
+        description="Last session that used/updated this tool"
+    )
 
 
 class ToolExecutionRequest(BaseModelConfig):
@@ -103,71 +147,6 @@ class ToolRegistrationResponse(BaseModelConfig):
     simpletooling_url: str = Field(description="SimpleTooling service URL")
 
 
-class ToolMetadata(DatabaseModel):
-    """Tool metadata for tracking and management."""
-
-    name: str = Field(description="Tool name")
-    file_name: str = Field(description="Python file name")
-    file_path: str = Field(description="Full file path")
-    description: str = Field(description="Tool description")
-    session_id: Optional[str] = Field(
-        default=None,
-        description="Associated session ID"
-    )
-    input_schema: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Input validation schema"
-    )
-    output_schema: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Output schema"
-    )
-    test_cases: List[Dict[str, Any]] = Field(
-        default_factory=list,
-        description="Test cases for the tool"
-    )
-    status: str = Field(
-        default="pending",
-        description="Tool status: pending, registered, deprecated, failed"
-    )
-    category: Optional[str] = Field(
-        default=None,
-        description="Tool category"
-    )
-    version: str = Field(
-        default="1.0.0",
-        description="Tool version"
-    )
-    dependencies: List[str] = Field(
-        default_factory=list,
-        description="Required Python packages"
-    )
-    endpoint: Optional[str] = Field(
-        default=None,
-        description="SimpleTooling HTTP endpoint URL"
-    )
-    registered: bool = Field(
-        default=False,
-        description="Whether registered with SimpleTooling"
-    )
-    last_registration_attempt: Optional[str] = Field(
-        default=None,
-        description="Last registration attempt timestamp"
-    )
-    registration_error: Optional[str] = Field(
-        default=None,
-        description="Last registration error message"
-    )
-    deprecated_at: Optional[str] = Field(
-        default=None,
-        description="Deprecation timestamp"
-    )
-    deprecation_reason: Optional[str] = Field(
-        default=None,
-        description="Reason for deprecation"
-    )
-
-
 class ToolFile(BaseModelConfig):
     """Tool file information for storage management."""
 
@@ -202,7 +181,7 @@ class ToolListRequest(BaseModelConfig):
 class ToolListResponse(BaseModelConfig):
     """Response model for tool listing."""
 
-    tools: List[ToolMetadata] = Field(
+    tools: List[Tool] = Field(
         description="List of tools"
     )
     total_count: int = Field(description="Total number of tools")
@@ -213,37 +192,3 @@ class ToolListResponse(BaseModelConfig):
     registered_count: int = Field(
         description="Number of registered tools"
     )
-
-
-class BulkToolUploadRequest(BaseModelConfig):
-    """Request model for bulk tool file upload."""
-
-    files: List[Dict[str, Any]] = Field(
-        description="Tool files to upload"
-    )
-    options: Optional[Dict[str, Any]] = Field(
-        default=None,
-        description="Upload options"
-    )
-    auto_register: bool = Field(
-        default=True,
-        description="Automatically register uploaded tools"
-    )
-
-
-class BulkToolUploadResponse(BaseModelConfig):
-    """Response model for bulk tool upload."""
-
-    uploaded_files: List[Dict[str, Any]] = Field(
-        description="Successfully uploaded files"
-    )
-    registered_tools: List[ToolMetadata] = Field(
-        default_factory=list,
-        description="Successfully registered tools"
-    )
-    errors: List[Dict[str, str]] = Field(
-        default_factory=list,
-        description="Upload/registration errors"
-    )
-    total_uploaded: int = Field(description="Total files uploaded")
-    total_registered: int = Field(description="Total tools registered")
