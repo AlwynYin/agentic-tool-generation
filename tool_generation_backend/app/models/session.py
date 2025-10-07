@@ -100,7 +100,7 @@ class Session(DatabaseModel):
         description="Current workflow status"
     )
 
-    # Tool references (stored in separate tools collection)
+    # Tool references (stored in separate tools collection as ObjectIds)
     tool_ids: List[str] = Field(
         default_factory=list,
         description="IDs of tools in the tools collection"

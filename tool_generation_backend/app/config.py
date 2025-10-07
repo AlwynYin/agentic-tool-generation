@@ -15,9 +15,15 @@ class Settings(BaseSettings):
 
     # Database
     mongodb_url: str = Field(
-        default="mongodb://localhost:27017/tool_generation_service",
+        default="mongodb://localhost:27017",
         env="MONGODB_URL",
-        description="MongoDB connection URL"
+        description="MongoDB connection URL (without database name)"
+    )
+
+    mongodb_db_name: str = Field(
+        default="tool_generation_backend",
+        env="MONGODB_DB_NAME",
+        description="MongoDB database name"
     )
 
     # AI Services
@@ -85,6 +91,11 @@ class Settings(BaseSettings):
     def tools_path(self) -> str:
         """Get the full tools directory path."""
         return f"{self.tool_service_dir}/{self.tools_dir}"
+
+    @property
+    def repos_path(self) -> str:
+        """Get the repos directory path for library documentation."""
+        return f"{self.tool_service_dir}/repos"
 
     class Config:
         env_file = ".env"

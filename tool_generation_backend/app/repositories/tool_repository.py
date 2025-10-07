@@ -105,7 +105,7 @@ class ToolRepository(BaseRepository[Tool]):
         Get multiple tools by their IDs.
 
         Args:
-            tool_ids: List of tool IDs
+            tool_ids: List of tool IDs (as strings)
 
         Returns:
             List[Tool]: List of tools (may be shorter than input if some not found)

@@ -15,12 +15,12 @@ _client: Optional[AsyncIOMotorClient] = None
 _database: Optional[AsyncIOMotorDatabase] = None
 
 
-async def init_database(mongodb_url: str, database_name: str = "agent_browser") -> None:
+async def init_database(mongodb_url: str, database_name: str) -> None:
     """
     Initialize MongoDB connection and setup database.
 
     Args:
-        mongodb_url: MongoDB connection URL
+        mongodb_url: MongoDB connection URL (without database name)
         database_name: Name of the database to use
 
     Raises:

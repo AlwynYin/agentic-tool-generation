@@ -20,23 +20,28 @@ class MongoSession(SessionABC):
     in MongoDB for persistence across agent interactions.
     """
 
-    def __init__(self, session_id: str, mongo_url: Optional[str] = None):
+    def __init__(self, session_id: str, mongo_url: Optional[str] = None, database_name: Optional[str] = None):
         """
         Initialize MongoDB session.
 
         Args:
             session_id: Unique session identifier
             mongo_url: MongoDB connection URL (defaults to config)
+            database_name: Database name (defaults to config)
         """
         self.session_id = session_id
 
-        # Use config if mongo_url not provided
-        if mongo_url is None:
+        # Use config if parameters not provided
+        if mongo_url is None or database_name is None:
             from app.config import get_settings
-            mongo_url = get_settings().mongodb_url
+            settings = get_settings()
+            if mongo_url is None:
+                mongo_url = settings.mongodb_url
+            if database_name is None:
+                database_name = settings.mongodb_db_name
 
         self.client = AsyncIOMotorClient(mongo_url)
-        self.collection = self.client.tool_generation_service.agent_sessions
+        self.collection = self.client[database_name].agent_sessions
 
     async def get_items(self) -> List[Dict[str, Any]]:
         """

@@ -32,7 +32,7 @@ async def lifespan(app: FastAPI):
     logging.info(f"🌐 Port: {settings.port}")
 
     # Initialize database connection
-    await init_database(settings.mongodb_url)
+    await init_database(settings.mongodb_url, settings.mongodb_db_name)
     logging.info("✅ Database connection established")
 
     # Authenticate Codex CLI

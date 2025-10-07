@@ -13,9 +13,12 @@ import shutil
 import os
 from typing import Dict, Any, Optional, List
 from pathlib import Path
+from datetime import datetime
 
 from app.config import get_settings
 from app.models import ToolRequirement
+from app.models.session import ParameterSpec, OutputSpec
+from app.models.api_reference import ApiBrowseResult, ApiFunction, ApiExample
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -142,62 +145,108 @@ async def execute_codex_implement(requirement: ToolRequirement) -> Dict[str, Any
 
 async def execute_codex_browse(
     library: str,
-    query: str
-) -> Dict[str, Any]:
+    queries: List[str]
+):
     """
-    Execute Codex to browse/search documentation.
+    Execute Codex to browse/search documentation and extract API references.
 
     Args:
         library: Library name (rdkit, ase, pymatgen, pyscf)
-        query: Search query for documentation
+        queries: List of search queries for API documentation
 
     Returns:
-        Dict with browse result
+        ApiBrowseResult with structured API function references
     """
+
     try:
-        # Map library to repository URL
-        repo_urls = {
-            "rdkit": "https://github.com/rdkit/rdkit",
-            "ase": "https://github.com/rosswhitfield/ase",
-            "pymatgen": "https://github.com/materialsproject/pymatgen",
-            "pyscf": "https://github.com/pyscf/pyscf"
-        }
-
+        # Get repos path from settings
+        repos_dir = Path(settings.repos_path)
         library_lower = library.lower()
-        if library_lower not in repo_urls:
-            return {
-                "success": False,
-                "error": f"Unknown library: {library}",
-                "available_libraries": list(repo_urls.keys())
-            }
 
-        repo_url = repo_urls[library_lower]
+        # Check if library directory exists
+        library_dir = repos_dir / library_lower
+        if not library_dir.exists():
+            logger.error(f"Library directory not found: {library_dir}")
+            return ApiBrowseResult(
+                success=False,
+                library=library,
+                queries=queries,
+                error=f"Library '{library}' not found in {repos_dir}. Available: {[d.name for d in repos_dir.iterdir() if d.is_dir()]}"
+            )
 
-        # Get project root and workspace path
-        project_root = Path("/Users/alwyn/Developer/matterlab/agent-browser")
-        workspaces_dir = project_root / "workspaces"
+        # Check if navigation guide exists
+        nav_guide_path = repos_dir / f"{library_lower}.md"
+        if not nav_guide_path.exists():
+            logger.warning(f"Navigation guide not found: {nav_guide_path}")
+            nav_guide_content = "No navigation guide available."
+        else:
+            with open(nav_guide_path, 'r') as f:
+                nav_guide_content = f.read()
+            logger.info(f"Loaded navigation guide from {nav_guide_path}")
 
-        # Create a browsing prompt
-        browse_prompt = f"""
-        You will be given a repository name, URL, and a search query. Your job is to clone the repository if not exist,
-        and search its documentation for information about the query.
+        # Create output filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_filename = f"{library_lower}_api_refs_{timestamp}.json"
+        output_path = repos_dir / output_filename
 
-        <Repository>
-        {library}
-        </Repository>
-        <url>{repo_url}</url>
-        <query>
-        {query}
-        </query>
+        # Build the browsing prompt with structured output requirements
+        queries_text = "\n".join([f"  - {q}" for q in queries])
 
-        Focus on:
-        1. API documentation
-        2. Code examples
-        3. Function signatures
-        4. Usage patterns
+        browse_prompt = f"""You are tasked with extracting API function references from the {library} library documentation.
 
-        Return the findings in a structured JSON format.
-        """
+<Navigation Guide>
+{nav_guide_content}
+</Navigation Guide>
+
+<Repository Location>
+{library_dir}
+</Repository Location>
+
+<Queries>
+{queries_text}
+</Queries>
+
+Your task:
+1. Search the repository's documentation for API functions related to each query
+2. For each relevant function, extract:
+   - Full function name (e.g., "rdkit.Chem.Descriptors.MolWt")
+   - Description
+   - Input parameters (name, type, description)
+   - Output type and description
+   - 2-3 simple usage examples with code and expected output
+
+3. Output the results as a JSON array with this exact structure:
+[
+  {{
+    "function_name": "module.submodule.function_name",
+    "description": "What the function does",
+    "input_schema": [
+      {{
+        "name": "param1",
+        "type": "str",
+        "description": "Parameter description"
+      }}
+    ],
+    "output_schema": {{
+      "type": "float",
+      "description": "Output description"
+    }},
+    "examples": [
+      {{
+        "description": "Example description",
+        "code": "from module import func\\nresult = func('value')",
+        "expected_output": "Expected result description"
+      }}
+    ]
+  }}
+]
+
+IMPORTANT:
+- Save your output to: {output_path}
+- Use valid JSON format
+- Include complete function signatures with accurate types
+- Provide working code examples
+"""
 
         # Build command for browsing
         cmd = [
@@ -205,38 +254,91 @@ async def execute_codex_browse(
             "--model", "gpt-5",
             "--dangerously-bypass-approvals-and-sandbox",
             "--skip-git-repo-check",
-            "--cd", str(workspaces_dir),
+            "--cd", str(repos_dir),
             browse_prompt
         ]
 
+        logger.info(f"Starting Codex browse for library '{library}' with {len(queries)} queries")
         result = await _run_codex_command(cmd, timeout=300)
 
-        if result["success"]:
-            logger.info(f"Documentation browsing completed for library {library}")
-            return {
-                "success": True,
-                "library": library,
-                "repo_url": repo_url,
-                "query": query,
-                "findings": result["stdout"],
-                "message": "Browse operation completed"
-            }
-        else:
-            logger.error(f"Codex browsing failed for library {library}: {result['error']}")
-            return {
-                "success": False,
-                "library": library,
-                "error": result["error"],
-                "stderr": result["stderr"]
-            }
+        if not result["success"]:
+            logger.error(f"Codex command failed: {result['error']}")
+            return ApiBrowseResult(
+                success=False,
+                library=library,
+                queries=queries,
+                error=result["error"]
+            )
+
+        # Check if output file was created
+        if not output_path.exists():
+            logger.error(f"Output file not created: {output_path}")
+            logger.error(f"Codex stdout: {result['stdout'][:500]}")
+            return ApiBrowseResult(
+                success=False,
+                library=library,
+                queries=queries,
+                error=f"Output file not created by Codex: {output_path}"
+            )
+
+        # Parse the JSON output
+        try:
+            with open(output_path, 'r') as f:
+                api_functions_data = json.load(f)
+
+            # Validate and convert to Pydantic models
+            api_functions = []
+            for func_data in api_functions_data:
+                try:
+                    # Convert examples if present
+                    examples = []
+                    for ex in func_data.get('examples', []):
+                        examples.append(ApiExample(**ex))
+
+                    api_func = ApiFunction(
+                        function_name=func_data['function_name'],
+                        description=func_data['description'],
+                        input_schema=[ParameterSpec(**p) for p in func_data.get('input_schema', [])],
+                        output_schema=OutputSpec(**func_data['output_schema']),
+                        examples=examples
+                    )
+                    api_functions.append(api_func)
+                except Exception as e:
+                    logger.warning(f"Failed to parse API function: {e}")
+                    logger.warning(f"Data: {func_data}")
+                    continue
+
+            logger.info(f"Successfully extracted {len(api_functions)} API functions")
+            return ApiBrowseResult(
+                success=True,
+                library=library,
+                queries=queries,
+                api_functions=api_functions,
+                output_file=str(output_path)
+            )
+
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse JSON output: {e}")
+            with open(output_path, 'r') as f:
+                content = f.read()
+            logger.error(f"File content: {content[:500]}")
+            return ApiBrowseResult(
+                success=False,
+                library=library,
+                queries=queries,
+                error=f"Invalid JSON in output file: {e}"
+            )
 
     except Exception as e:
         logger.error(f"Exception in Codex browsing for library {library}: {e}")
-        return {
-            "success": False,
-            "library": library,
-            "error": str(e)
-        }
+        import traceback
+        logger.error(traceback.format_exc())
+        return ApiBrowseResult(
+            success=False,
+            library=library,
+            queries=queries,
+            error=str(e)
+        )
 
 
 async def _run_codex_command(cmd: List[str], timeout: int = 120) -> Dict[str, Any]:
@@ -384,101 +486,3 @@ def _build_implementation_prompt(requirement: ToolRequirement, settings) -> str:
     ])
 
     return "\n".join(prompt_parts)
-
-
-async def test_codex_implementation():
-    """
-    Test function for codex implementation.
-
-    Creates a simple molecular weight calculator tool for testing.
-    """
-    print("Testing codex implementation...")
-
-    # Define test requirements
-    test_requirements = [
-        {
-            "name": "calculate_molecular_weight",
-            "description": "Calculate molecular weight from SMILES string using RDKit",
-            "params": [
-                {
-                    "name": "smiles",
-                    "type": "str",
-                    "description": "SMILES string representing the molecule"
-                },
-                {
-                    "name": "precision",
-                    "type": "int",
-                    "description": "Number of decimal places for result (default: 2)"
-                }
-            ],
-            "returns": {
-                "type": "Dict[str, Any]",
-                "description": "Dictionary containing molecular weight and metadata"
-            }
-        }
-    ]
-
-    # Test implementation
-    try:
-        result = await execute_codex_implement("test_molecular_tools", test_requirements)
-
-        print(f"Implementation result: {result['success']}")
-        if result["success"]:
-            print(f"Tool created at: {result['output_file']}")
-            print(f"Stdout: {result['stdout'][:200]}...")  # First 200 chars
-        else:
-            print(f"Error: {result['error']}")
-            if "stderr" in result:
-                print(f"Stderr: {result['stderr']}")
-
-        return result
-
-    except Exception as e:
-        print(f"Exception during test: {e}")
-        return {"success": False, "error": str(e)}
-
-
-async def test_codex_browse():
-    """
-    Test function for codex browsing.
-
-    Tests documentation browsing for RDKit molecular weight functions.
-    """
-    print("Testing codex browsing...")
-
-    try:
-        result = await execute_codex_browse("rdkit", "molecular weight calculation")
-
-        print(f"Browse result: {result['success']}")
-        if result["success"]:
-            print(f"Library: {result['library']}")
-            print(f"Query: {result['query']}")
-            print(f"Findings: {result['findings'][:200]}...")  # First 200 chars
-        else:
-            print(f"Error: {result['error']}")
-
-        return result
-
-    except Exception as e:
-        print(f"Exception during browse test: {e}")
-        return {"success": False, "error": str(e)}
-
-
-if __name__ == "__main__":
-    import asyncio
-
-    async def run_tests():
-        """Run all codex tests."""
-        print("=== Codex Utils Test Suite ===\n")
-
-        # Test implementation
-        print("2. Testing tool implementation:")
-        impl_result = await test_codex_implementation()
-        print()
-
-        # Summary
-        print("=== Test Summary ===")
-        print(f"Implementation test: {'PASS' if impl_result['success'] else 'FAIL'}")
-
-    # Run the tests
-    asyncio.run(run_tests())

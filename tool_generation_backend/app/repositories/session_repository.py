@@ -133,16 +133,19 @@ class SessionRepository(BaseRepository[Session]):
 
         Args:
             session_id: Session ID
-            tool_id: Tool ID to add
+            tool_id: Tool ID to add (stored as ObjectId in MongoDB)
 
         Returns:
             bool: True if added successfully
         """
         try:
+            # Convert tool_id string to ObjectId for MongoDB storage
+            tool_object_id = ObjectId(tool_id)
+
             # Use MongoDB array push operation
             result = await self.collection.update_one(
                 {"_id": ObjectId(session_id)},
-                {"$push": {"tool_ids": tool_id}}
+                {"$push": {"tool_ids": tool_object_id}}
             )
 
             success = result.modified_count > 0

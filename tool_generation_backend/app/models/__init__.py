@@ -22,6 +22,12 @@ from .tool import (
     ToolListRequest,
     ToolListResponse,
 )
+from .api_reference import (
+    ApiQuery,
+    ApiFunction,
+    ApiExample,
+    ApiBrowseResult,
+)
 
 __all__ = [
     # Base models
@@ -47,4 +53,9 @@ __all__ = [
     "ToolRegistrationResponse",
     "ToolListRequest",
     "ToolListResponse",
+    # API Reference models
+    "ApiQuery",
+    "ApiFunction",
+    "ApiExample",
+    "ApiBrowseResult",
 ]
