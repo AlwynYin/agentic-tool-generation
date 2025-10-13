@@ -15,7 +15,8 @@ from app.utils.codex_utils import (
     execute_codex_implement,
     execute_codex_browse
 )
-from app.models.session import ToolRequirement, ToolGenerationResult
+from app.models.session import ToolRequirement
+from app.models.tool_generation import ToolGenerationResult
 
 logger = logging.getLogger(__name__)
 

@@ -250,9 +250,12 @@ class BaseRepository(ABC, Generic[T]):
             document["id"] = str(document["_id"])
             del document["_id"]
 
-        # Convert ObjectId arrays to string arrays (e.g., tool_ids)
+        # Convert ObjectId arrays to string arrays (e.g., tool_ids, tool_failure_ids)
         if "tool_ids" in document and document["tool_ids"]:
             document["tool_ids"] = [str(oid) for oid in document["tool_ids"]]
+
+        if "tool_failure_ids" in document and document["tool_failure_ids"]:
+            document["tool_failure_ids"] = [str(oid) for oid in document["tool_failure_ids"]]
 
         # Create model instance
         return self.model_class(**document)

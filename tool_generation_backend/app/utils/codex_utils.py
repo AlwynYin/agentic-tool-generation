@@ -36,10 +36,11 @@ def authenticate_codex(api_key: str) -> bool:
         codex_path = which_result.stdout.strip()
         logging.info(f"✅ Found Codex CLI at: {codex_path}")
 
-        # Authenticate with API key
+        # Authenticate with API key (pipe it to stdin)
         logging.info("🔐 Authenticating Codex CLI with OpenAI API key...")
         auth_result = subprocess.run(
-            [codex_path, 'login', '--api-key', api_key],
+            [codex_path, 'login', '--with-api-key'],
+            input=api_key,  # Pipe API key via stdin
             capture_output=True,
             text=True,
             timeout=30

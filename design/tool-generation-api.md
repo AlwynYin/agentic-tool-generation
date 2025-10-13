@@ -1,11 +1,21 @@
 # Tool Generation Service API Specification
 
 ## Overview
-This document defines the API specification for the Tool Generation Service that integrates with the SimpleTooling framework.
+This document defines the API specification for the Tool Generation Service.
 
-Users generate code by passing tool requirements in natural language. A `job` is created, which generate tools asynchronously. User can choose two ways to monitor the job: poll for job status in a loop or ~~receive job status updates using websocket~~ (WIP)
+Users generate code by passing tool requirements in natural language. A `job` is created, which generates tools asynchronously using an OpenAI agent-based workflow. Users can monitor job progress by polling the job status endpoint.
 
-Each tool will be a python file that integrates with SimpleTooling's `@toolset.add()` decorator pattern and is automatically registered as an HTTP endpoint. Tools are stored in a shared filesystem and immediately available through the SimpleTooling server.
+The service uses a session-based architecture where:
+- Each job creates a corresponding session that tracks the multi-agent workflow
+- Tools are stored in a MongoDB `tools` collection with complete code, metadata, and schemas
+- Tool IDs are stored as ObjectIds in MongoDB and returned as strings via the API
+- The workflow progresses through stages: pending → planning → searching → implementing → executing → completed/failed
+
+## Service Configuration
+
+- **Base URL**: Configurable via `HOST` and `PORT` environment variables (default: `http://localhost:8000`)
+- **Database**: MongoDB connection via `MONGODB_URL` and `MONGODB_DB_NAME` (default: `mongodb://localhost:27017` and `agent_browser`)
+- **API Version**: v1 (`/api/v1/`)
 
 ## Service Endpoints
 
@@ -21,10 +31,7 @@ interface HealthResponse {
     status: 'healthy' | 'unhealthy'
     timestamp: string
     version: string
-    dependencies: {
-        ai_service: 'available' | 'unavailable'
-        database: 'available' | 'unavailable'
-    }
+    database: 'connected' | 'disconnected'
 }
 ```
 
@@ -56,6 +63,25 @@ interface JobResponse {
 Get job status and metadata.
 
 **Response:** `JobResponse`
+
+### Session Management (Internal)
+
+The following session endpoints are available for advanced use cases but are typically managed internally by the job workflow:
+
+#### `GET /api/v1/sessions/{session_id}`
+Get session details by session ID.
+
+#### `GET /api/v1/sessions/{session_id}/tools`
+Get all tools generated for a specific session.
+
+#### `GET /api/v1/sessions/{session_id}/status`
+Get detailed session status including workflow progress.
+
+#### `GET /api/v1/sessions/user/{user_id}`
+Get all sessions for a specific user.
+
+#### `GET /api/v1/sessions/status/{status_value}`
+Get all sessions with a specific status (e.g., "completed", "failed").
 
 
 ## Data Models
@@ -105,13 +131,13 @@ interface JobProgress {
 }
 
 interface ToolFile {
-    toolId: string                // Unique tool identifier
+    toolId: string                // Unique tool identifier (MongoDB ObjectId stored as string)
     fileName: string              // e.g., "calculate_molecular_weight.py"
-    filePath: string              // Full path: "tools/generated/calculate_molecular_weight.py"
+    filePath: string              // Virtual file path (for compatibility)
     description: string           // Tool description from requirement
     code: string                  // Generated Python code content
-    endpoint?: string             // SimpleTooling HTTP endpoint URL
-    registered: boolean           // Whether registered with SimpleTooling
+    endpoint?: string             // Reserved for future use (currently null)
+    registered: boolean           // Tool status (draft/registered/deprecated/failed)
     createdAt: string             // ISO timestamp
 }
 ```
@@ -168,7 +194,7 @@ type ErrorCode =
 
 ```bash
 # Create job
-curl -X POST http://localhost:8002/api/v1/jobs \
+curl -X POST http://localhost:8000/api/v1/jobs \
   -H "Content-Type: application/json" \
   -d '{
     "toolRequirements": [
@@ -203,7 +229,7 @@ curl -X POST http://localhost:8002/api/v1/jobs \
 ### Check Job Status
 
 ```bash
-curl http://localhost:8002/api/v1/jobs/job_abc123
+curl http://localhost:8000/api/v1/jobs/job_abc123
 
 # Response
 {
@@ -224,7 +250,7 @@ curl http://localhost:8002/api/v1/jobs/job_abc123
 ### Retrieve Generated Tools
 
 ```bash
-curl http://localhost:8002/api/v1/jobs/job_abc123
+curl http://localhost:8000/api/v1/jobs/job_abc123
 
 # Response (when completed)
 {
@@ -243,10 +269,10 @@ curl http://localhost:8002/api/v1/jobs/job_abc123
     {
       "toolId": "tool_xyz789",
       "fileName": "calculate_molecular_weight.py",
-      "code": "<python code content>",
+      "filePath": "tools/calculate_molecular_weight.py",
       "description": "Calculate molecular weight from SMILES string using RDKit",
-      "code": "from tools.toolset import toolset\nfrom typing import Dict\n\n@toolset.add()\ndef calculate_molecular_weight(smiles: str) -> Dict[str, float]:\n    \"\"\"Calculate molecular weight of a chemical compound from SMILES string.\"\"\"\n    from rdkit import Chem\n    from rdkit.Chem import Descriptors\n    \n    try:\n        mol = Chem.MolFromSmiles(smiles)\n        if mol is None:\n            raise ValueError(f\"Invalid SMILES string: {smiles}\")\n        \n        molecular_weight = Descriptors.MolWt(mol)\n        return {'molecular_weight': molecular_weight}\n    except Exception as e:\n        raise ValueError(f\"Error calculating molecular weight: {str(e)}\")",
-      "endpoint": "http://localhost:8000/tool/calculate_molecular_weight",
+      "code": "from typing import Dict\n\ndef calculate_molecular_weight(smiles: str) -> Dict[str, float]:\n    \"\"\"Calculate molecular weight of a chemical compound from SMILES string.\"\"\"\n    from rdkit import Chem\n    from rdkit.Chem import Descriptors\n    \n    try:\n        mol = Chem.MolFromSmiles(smiles)\n        if mol is None:\n            raise ValueError(f\"Invalid SMILES string: {smiles}\")\n        \n        molecular_weight = Descriptors.MolWt(mol)\n        return {'molecular_weight': molecular_weight}\n    except Exception as e:\n        raise ValueError(f\"Error calculating molecular weight: {str(e)}\")",
+      "endpoint": null,
       "registered": true,
       "createdAt": "2024-01-15T10:31:30Z"
     }
@@ -263,54 +289,68 @@ curl http://localhost:8002/api/v1/jobs/job_abc123
 ### Python Client Example
 see `tool_generation_backend/tests/test_v1_pipeline.py`
 
-## Tool File Storage Design
+## Tool Storage Architecture
 
-### Directory Structure (SimpleTooling Integration)
-Tools are placed in organized directories under `tools/` with automatic SimpleTooling registration. Generated tools go in `tools/generated/` while custom uploaded tools go in `tools/custom/`.
+### MongoDB Collections
 
-```
-simpletooling_template/
-├── tools/
-│   ├── __init__.py
-│   ├── toolset.py                    # Shared toolset instance
-│   ├── calculator.py                 # Pre-existing tools
-│   ├── generated/                    # Auto-generated tools
-│   ├── calculate_molecular_weight.py
-│   └── metadata/
-│       ├── registry.json             # Tool registry with endpoints
-│       ├── dependencies.json         # Global dependencies
-└── main.py
-```
+Tools are stored in a MongoDB database with the following collections:
 
-### File Naming Convention
-```
-{snake_case_tool_name}.py
-```
-Examples:
-- `calculate_molecular_weight.py`
-- `visualize_protein_structure.py`  
-- `convert_file_format.py`
+1. **`sessions` collection**: Tracks tool generation workflows
+   - `job_id`: Associated job identifier
+   - `user_id`: User who created the job
+   - `status`: Current workflow status (pending/planning/searching/implementing/executing/completed/failed)
+   - `tool_ids`: Array of ObjectIds referencing tools in the `tools` collection
+   - `tool_requirements`: Original user requirements
+   - `created_at`, `updated_at`: Timestamps
 
-### Python File Structure (SimpleTooling Integration)
+2. **`tools` collection**: Stores generated tools with full metadata
+   - `_id`: MongoDB ObjectId (returned as string in API)
+   - `name`: Tool name (unique identifier)
+   - `file_name`: Python file name (e.g., "calculate_molecular_weight.py")
+   - `file_path`: Virtual file path (for compatibility)
+   - `description`: Tool description
+   - `code`: Complete Python code implementation
+   - `input_schema`: Input parameter specifications
+   - `output_schema`: Output type specification
+   - `dependencies`: Required Python packages
+   - `test_cases`: Tool test cases
+   - `status`: Tool status (draft/registered/deprecated/failed)
+   - `session_id`: Session that generated this tool
+   - `created_at`, `updated_at`: Timestamps
+
+3. **`agent_sessions` collection**: OpenAI Agents SDK conversation history
+   - Stores agent conversation state and memory
+
+### Database Configuration
+
+The database name is configurable via the `MONGODB_DB_NAME` environment variable (default: `agent_browser`).
+
+### Tool ID Storage
+
+Tool IDs are stored as MongoDB ObjectIds in the database for efficiency (12 bytes vs ~24 bytes for strings), but are converted to strings at the API boundary for compatibility.
+
+### Python Code Structure
+
+Generated tools follow this structure:
+
 ```python
 """
 Generated Tool: Calculate Molecular Weight
-Created: 2024-01-15T10:31:30Z
-Tool ID: tool_xyz789
 Description: Calculate molecular weight from SMILES string using RDKit
 Dependencies: rdkit
 """
 
-from tools.toolset import toolset
 from typing import Dict
 
-@toolset.add()
 def calculate_molecular_weight(smiles: str) -> Dict[str, float]:
     """
     Calculate molecular weight of a chemical compound from SMILES string.
 
-    :param smiles: SMILES string representation of the molecule
-    :return: Dictionary containing molecular weight
+    Args:
+        smiles: SMILES string representation of the molecule
+
+    Returns:
+        Dictionary containing molecular weight
     """
     from rdkit import Chem
     from rdkit.Chem import Descriptors
@@ -324,43 +364,5 @@ def calculate_molecular_weight(smiles: str) -> Dict[str, float]:
         return {'molecular_weight': molecular_weight}
     except Exception as e:
         raise ValueError(f"Error calculating molecular weight: {str(e)}")
-
-# Tool metadata for service tracking
-__TOOL_METADATA__ = {
-    "tool_id": "tool_xyz789",
-    "job_id": "job_abc123",
-    "generated_at": "2024-01-15T10:31:30Z",
-    "dependencies": ["rdkit"]
-}
-```
-
-### Metadata Management
-
-#### Tool Registry (`metadata/registry.json`)
-```json
-{
-  "tool_xyz789": {
-    "name": "calculate_molecular_weight",
-    "fileName": "calculate_molecular_weight.py",
-    "filePath": "tools/generated/chemistry/calculate_molecular_weight.py",
-    "category": "chemistry",
-    "description": "Calculate molecular weight from SMILES string using RDKit",
-    "endpoint": "http://localhost:8000/tool/calculate_molecular_weight",
-    "dependencies": ["rdkit"],
-    "createdAt": "2024-01-15T10:31:30Z",
-    "registeredAt": "2024-01-15T10:31:45Z",
-    "jobId": "job_abc123"
-  }
-}
-```
-
-#### Global Dependencies (`metadata/dependencies.json`)
-```json
-[
-  "rdkit",
-  "numpy",
-  "pandas",
-  "matplotlib"
-]
 ```
 

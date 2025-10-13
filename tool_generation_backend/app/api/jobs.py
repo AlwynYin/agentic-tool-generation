@@ -129,14 +129,17 @@ async def get_job_status(
         # Get tools from tools collection using tool_ids
         tool_count = len(session.tool_ids) if session.tool_ids else 0
 
+        # Get failures count from tool_failure_ids
+        failure_count = len(session.tool_failure_ids) if session.tool_failure_ids else 0
+
         # Check if session is in terminal state
         is_terminal = session.status in [SessionStatus.COMPLETED, SessionStatus.FAILED]
 
         progress = JobProgress(
             total=total_tools,
             completed=tool_count,
-            failed=0,
-            inProgress=0 if is_terminal else (total_tools - tool_count),
+            failed=failure_count,
+            inProgress=0 if is_terminal else (total_tools - tool_count - failure_count),
             currentTool=None if is_terminal else "processing"
         )
 
@@ -158,6 +161,19 @@ async def get_job_status(
                 for tool in tools
             ]
 
+        # Fetch failures from tool_failures collection if completed
+        failures_response = None
+        if session.status == SessionStatus.COMPLETED and session.tool_failure_ids:
+            from app.models.tool_generation import ToolGenerationFailure
+            tool_failures = await session_service.get_session_failures(session.id)
+            failures_response = [
+                ToolGenerationFailure(
+                    toolRequirement=failure.user_requirement,
+                    error=failure.error_message
+                )
+                for failure in tool_failures
+            ]
+
         return JobResponse(
             jobId=jobId,
             status=session.status,  # Convert enum to string for API response
@@ -165,11 +181,11 @@ async def get_job_status(
             updatedAt=session.updated_at.isoformat() if session.updated_at else datetime.now(timezone.utc).isoformat(),
             progress=progress,
             toolFiles=tool_files_response,
-            failures=None,
+            failures=failures_response,
             summary=GenerationSummary(
-                totalRequested=tool_count,
+                totalRequested=total_tools,
                 successful=tool_count,
-                failed=0
+                failed=failure_count
             ) if session.status == SessionStatus.COMPLETED else None
         )
 
