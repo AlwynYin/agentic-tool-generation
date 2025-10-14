@@ -158,6 +158,37 @@ class SessionRepository(BaseRepository[Session]):
             logger.error(f"Failed to add tool ID to session {session_id}: {e}")
             return False
 
+    async def add_tool_failure_id(self, session_id: str, failure_id: str) -> bool:
+        """
+        Add a tool failure ID to session's tool_failure_ids list.
+
+        Args:
+            session_id: Session ID
+            failure_id: Failure ID to add (stored as ObjectId in MongoDB)
+
+        Returns:
+            bool: True if added successfully
+        """
+        try:
+            # Convert failure_id string to ObjectId for MongoDB storage
+            failure_object_id = ObjectId(failure_id)
+
+            # Use MongoDB array push operation
+            result = await self.collection.update_one(
+                {"_id": ObjectId(session_id)},
+                {"$push": {"tool_failure_ids": failure_object_id}}
+            )
+
+            success = result.modified_count > 0
+            if success:
+                logger.info(f"Added tool failure ID to session {session_id}: {failure_id}")
+
+            return success
+
+        except Exception as e:
+            logger.error(f"Failed to add tool failure ID to session {session_id}: {e}")
+            return False
+
 
 
     async def get_sessions_by_user(self, user_id: str, limit: int = 50) -> List[Session]:

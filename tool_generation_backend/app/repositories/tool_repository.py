@@ -10,7 +10,7 @@ import os
 
 from .base import BaseRepository
 from app.models.tool import Tool, ToolStatus
-from app.models.session import ToolGenerationResult
+from app.models.tool_generation import ToolGenerationResult
 
 logger = logging.getLogger(__name__)
 

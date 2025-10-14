@@ -13,8 +13,9 @@ from datetime import datetime, timezone
 import agents
 from agents import Agent, Runner
 
-from app.models.operation import OperationContext, ImplementRequirements, UpdateRequirements
-from app.models.session import ToolRequirement, ToolGenerationResult
+from app.models import UserToolRequirement
+from app.models.session import ToolRequirement
+from app.models.tool_generation import ToolGenerationResult, ToolGenerationFailure, ToolGenerationOutput
 from app.memory.mongo_session import MongoSession
 from app.config import get_settings
 from app.agents.tools import implement_tool
@@ -47,7 +48,7 @@ class ToolGenerationPipeline:
             self._agent = Agent(
                 name="Chemistry Tool Generator",
                 instructions=self._get_agent_instructions(),
-                output_type=List[ToolGenerationResult],
+                output_type=ToolGenerationOutput,
                 model=self.settings.openai_model,
                 tools=[implement_tool]  # Use the @function_tool decorated function
             )
@@ -59,30 +60,27 @@ class ToolGenerationPipeline:
             logger.error(f"Failed to initialize agent: {e}")
             raise
 
-    async def process_operation(self, context: OperationContext) -> List[ToolGenerationResult]:
+    async def process_tool_generation(self, session_id: str, requests: List[UserToolRequirement]) -> ToolGenerationOutput:
         """
         Process tool generation operation using the OpenAI Agent.
 
         Args:
-            context: Operation context with user requirements
+            session_id: The session id of the tool generation request.
+            requests: List of User Tool Requirements.
 
         Returns:
-            List of generated tool requirements
+            ToolGenerationOutput with results and failures
         """
         self._ensure_agent()
 
-        # For now, only support implement operations
-        if context.operation_type != "implement":
-            raise ValueError(f"Only 'implement' operations are currently supported")
-
         try:
             # Create MongoDB session for conversation history
-            session = MongoSession(context.session_id)
+            session = MongoSession(session_id)
 
-            logger.info(f"Processing implement operation for session {context.session_id}")
+            logger.info(f"Processing implement operation for session {session_id}")
 
             # Build message for the agent
-            message = self._build_user_requirements_message(context)
+            message = self._build_user_requirements_message(requests)
 
             # Use agent to analyze requirements and call implement_chemistry_tool
             result = await Runner.run(
@@ -91,17 +89,20 @@ class ToolGenerationPipeline:
                 session=session
             )
 
-            logger.info(f"Agent execution completed for session {context.session_id}")
+            logger.info(f"Agent execution completed for session {session_id}")
             logger.debug(f"Result: {result}")
 
-            # Extract tool requirements from agent's tool calls
-            return result.final_output_as(List[ToolGenerationResult])
+            # Extract tool generation output
+            output = result.final_output_as(ToolGenerationOutput)
+            logger.info(f"Generated {output.success_count} tools, {output.failure_count} failures")
+
+            return output
 
         except Exception as e:
             logger.error(f"Error processing operation: {e}")
             raise
 
-    def _build_user_requirements_message(self, context: OperationContext) -> str:
+    def _build_user_requirements_message(self, tools: List[UserToolRequirement]) -> str:
         """
         Build message for the agent with user requirements.
 
@@ -111,10 +112,6 @@ class ToolGenerationPipeline:
         Returns:
             Formatted message for the agent
         """
-        if not isinstance(context.requirements, ImplementRequirements):
-            raise ValueError("Invalid requirements type")
-
-        tools = context.requirements.tools
         message = f"Generate {len(tools)} chemistry computation tools based on these requirements:\n\n"
 
         for i, tool in enumerate(tools, 1):
@@ -129,7 +126,12 @@ class ToolGenerationPipeline:
     def _get_agent_instructions(self) -> str:
         """Get system instructions for the single tool generation agent."""
         return """
-You are a Chemistry Tool Generation Expert. Your job is to analyze user requirements and create precise tool specifications.
+You are a Computational Chemistry Expert. Your job is to analyze user requirements and create precise computational chemistry tools.
+
+## Tool
+- A Tool is a python function that does one single computation task, with a well-typed and documented input and output schema. 
+- The tool should not be over-complicated and have multiple capabilities. If there's multiple separate jobs, there should be multiple separate tools.
+- The tool should be completely stateless. This means that it should not use any global state, and should not modify anything from the outer scope. It should output from, and only from, python's `return` statement. It should not modify the input.
 
 ## Your Process:
 1. **Analyze**: Understand what the user wants to accomplish
@@ -155,8 +157,39 @@ You are a Chemistry Tool Generation Expert. Your job is to analyze user requirem
 - "properties" → specific property names (mw, logp, tpsa, etc.)
 - "calculate" → specific algorithm or library function
 
+## Malformed Requirements:
+Some user requirements may be malformed or unsuitable. Common cases include:
+- **Too broad**: "make a computation toolset for molecules" (requires multiple tools)
+- **Not a computation task**: "make a http server", "create a database"
+- **Lacks specificity**: "do chemistry stuff", "analyze molecules" (what analysis?)
+- **Outside chemistry domain**: "parse JSON files", "send emails"
+- **Impossible/nonsensical**: "calculate the color of happiness"
+
+When you encounter a malformed requirement, DO NOT attempt to implement it.
+
 ## Output Specifications:
-You should return a list of all tools you have generated, each as a ToolGenerationResult object.
+You MUST return a ToolGenerationOutput object with two fields:
+- `results`: List of successfully generated tools (ToolGenerationResult objects)
+- `failures`: List of failed requirements (ToolGenerationFailure objects)
+
+For each user requirement, decide:
+
+1. **If the requirement is valid** → Call implement_chemistry_tool, then add a ToolGenerationResult to `results`:
+   - Set `success: true`
+   - Include all required fields: name, file_name, description, input_schema, output_schema, dependencies
+
+2. **If the requirement is malformed/invalid** → Add a ToolGenerationFailure to `failures`:
+   - Set `success: false`
+   - Include the original `userToolRequirement` object
+   - Provide a clear `error` message explaining why it cannot be implemented
+   - Provide a `error_type` message, containing one or two words classifying its problem
+
+Example failures:
+- "Requirement too broad: This describes multiple separate tools. Please specify individual computation tasks."
+- "Not a chemistry computation: HTTP servers are not chemistry tools. Please request molecular calculations, structure analysis, or property predictions."
+- "Lacks specificity: 'analyze molecules' could mean many things. Please specify which molecular properties or analyses you need."
+
+IMPORTANT: Every user requirement must appear in either `results` OR `failures`. The total count must match the number of requirements.
 
 Transform user descriptions into production-ready tool specifications and implement them.
 """

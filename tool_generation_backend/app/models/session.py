@@ -10,7 +10,8 @@ from typing import Any, Dict, List, Optional, Literal
 from pydantic import Field, BaseModel
 
 from .base import DatabaseModel, BaseModelConfig
-from .job import UserToolRequirement
+from .specs import UserToolRequirement, ParameterSpec, OutputSpec
+from .tool_generation import ToolGenerationResult
 
 
 
@@ -23,19 +24,6 @@ class SessionStatus(str, Enum):
     EXECUTING = "executing"
     COMPLETED = "completed"
     FAILED = "failed"
-
-
-class ParameterSpec(BaseModel):
-    """Specification of a parameter used by a function."""
-    name: str
-    type: str
-    description: str
-
-
-class OutputSpec(BaseModel):
-    """Specification of a parameter used by a function."""
-    type: str
-    description: str
 
 
 class ToolRequirement(BaseModelConfig):
@@ -52,28 +40,6 @@ class ToolRequirement(BaseModelConfig):
     required_apis: List[str] = Field(
         default_factory=list,
         description="API functions needed for this tool"
-    )
-
-
-class ToolGenerationResult(BaseModel):
-    """Tool generation result returned by implementation agent.
-       it contains all the necessary field of a ToolSpec, except for code, status, registered
-    """
-    success: bool = Field(description="Tool generation")
-    name: str = Field(description="Tool name")
-    file_name: str = Field(description="Python file name")
-    description: str = Field(description="Tool description")
-    input_schema: List[ParameterSpec] = Field(
-        default_factory=list,
-        description="Input schema"
-    )
-    output_schema: OutputSpec = Field(
-        default_factory=dict,
-        description="Output schema"
-    )
-    dependencies: List[str] = Field(
-        default_factory=list,
-        description="Required Python packages"
     )
 
 
@@ -104,6 +70,12 @@ class Session(DatabaseModel):
     tool_ids: List[str] = Field(
         default_factory=list,
         description="IDs of tools in the tools collection"
+    )
+
+    # Tool failure references (stored in separate tool_failures collection as ObjectIds)
+    tool_failure_ids: List[str] = Field(
+        default_factory=list,
+        description="IDs of failed tool generation attempts in the tool_failures collection"
     )
 
     error_message: Optional[str] = Field(

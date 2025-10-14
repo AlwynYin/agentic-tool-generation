@@ -6,17 +6,18 @@ import asyncio
 import logging
 import os
 
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 from datetime import datetime, timezone
 
 from app.models.session import (
-    SessionUpdate, SessionStatus, Session, ToolGenerationResult
+    SessionUpdate, SessionStatus, Session
 )
+from app.models.tool_generation import ToolGenerationResult, ToolGenerationFailure
 from app.models.tool import Tool
 from app.models.job import UserToolRequirement
-from app.models.operation import OperationContext
 from app.repositories.session_repository import SessionRepository
 from app.repositories.tool_repository import ToolRepository
+from app.repositories.tool_failure_repository import ToolFailureRepository
 from app.agents.pipeline import ToolGenerationPipeline
 from app.config import get_settings
 
@@ -30,6 +31,7 @@ class SessionService:
         self,
         session_repo: SessionRepository,
         tool_repo: ToolRepository,
+        tool_failure_repo: Optional[ToolFailureRepository] = None,
         websocket_manager: Optional[Any] = None
     ):
         """
@@ -38,10 +40,12 @@ class SessionService:
         Args:
             session_repo: Session repository
             tool_repo: Tool repository for deduplication
+            tool_failure_repo: Tool failure repository for storing failures
             websocket_manager: WebSocket manager for real-time updates
         """
         self.session_repo = session_repo
         self.tool_repo = tool_repo
+        self.tool_failure_repo = tool_failure_repo or ToolFailureRepository()
 
         # Initialize Chemistry Tool Pipeline
         self.pipeline = ToolGenerationPipeline()
@@ -179,6 +183,34 @@ class SessionService:
             logger.error(f"Error getting tools for session {session_id}: {e}")
             return []
 
+    async def get_session_failures(self, session_id: str):
+        """
+        Get tool generation failures for a session from the tool_failures collection.
+
+        Args:
+            session_id: Session ID
+
+        Returns:
+            List[ToolFailure]: Tool failures associated with the session
+        """
+        try:
+            session = await self.session_repo.get_by_id(session_id)
+            if not session:
+                logger.warning(f"Session not found: {session_id}")
+                return []
+
+            # Get failures from tool_failures collection using tool_failure_ids
+            if session.tool_failure_ids:
+                failures = await self.tool_failure_repo.get_by_ids(session.tool_failure_ids)
+                return failures
+            else:
+                logger.info(f"No tool_failure_ids for session {session_id}")
+                return []
+
+        except Exception as e:
+            logger.error(f"Error getting failures for session {session_id}: {e}")
+            return []
+
     async def get_active_sessions(self, limit: Optional[int] = None) -> list[Session]:
         """
         Get active sessions.
@@ -243,12 +275,18 @@ class SessionService:
                 raise ValueError(f"Session not found: {session_id}")
 
             # Create operation context and process through pipeline
-            operation_context = self._create_operation_context(session)
-            generation_results = await self.pipeline.process_operation(operation_context)
+            output = await self.pipeline.process_tool_generation(session.job_id, session.tool_requirements)
 
-            # Store the generated tool requirements in the session
-            if generation_results:
-                await self._store_tool_specs(session_id, generation_results)
+            # Log summary
+            logger.info(f"Generation complete: {output.success_count} successful, {output.failure_count} failed")
+
+            # Store the successfully generated tools
+            if output.results:
+                await self._store_tool_specs(session_id, output.results)
+
+            # Store failures if any
+            if output.failures:
+                await self._store_generation_failures(session_id, output.failures)
 
             # Mark session as completed
             await self._update_session_status(session_id, SessionStatus.COMPLETED)
@@ -275,37 +313,6 @@ class SessionService:
             # Clean up workflow tracking
             if session_id in self.active_workflows:
                 del self.active_workflows[session_id]
-
-    def _create_operation_context(self, session: Session) -> OperationContext:
-        """
-        Create operation context from session data.
-
-        Args:
-            session: Session with tool requirements
-
-        Returns:
-            OperationContext: Context for pipeline processing
-        """
-        if session.operation_type == "generate":
-            # Convert dict requirements to UserToolRequirement objects
-            tools = []
-            for req in session.tool_requirements:
-                if isinstance(req, dict):
-                    tools.append(UserToolRequirement(**req))
-                else:
-                    tools.append(req)
-
-            return OperationContext.create_implement_operation(
-                session_id=session.id,
-                tools=tools,
-                metadata={"job_id": session.job_id}
-            )
-
-        elif session.operation_type == "update":
-            # Convert dict requirements to UserToolRequirement objects
-            raise NotImplementedError()
-        else:
-            raise ValueError(f"Unsupported operation type: {session.operation_type}")
 
     async def _store_tool_specs(self, session_id: str, tool_generation_results: List[ToolGenerationResult]) -> None:
         """
@@ -362,6 +369,51 @@ class SessionService:
                 "tool_names": tools_processed,
                 "tool_count": len(tools_processed)
             })
+
+    async def _store_generation_failures(self, session_id: str, failures: List[ToolGenerationFailure]) -> None:
+        """
+        Store tool generation failures in tool_failures collection.
+
+        Args:
+            session_id: Session ID
+            failures: List of ToolGenerationFailure objects
+        """
+        try:
+            failure_ids = []
+            failure_summaries = []
+
+            for failure in failures:
+                # Create failure record in tool_failures collection
+                failure_id = await self.tool_failure_repo.create_from_generation_failure(
+                    failure=failure,
+                    session_id=session_id
+                )
+                failure_ids.append(failure_id)
+
+                # Add failure ID to session
+                await self.session_repo.add_tool_failure_id(session_id, failure_id)
+
+                # Collect summary for logging
+                req = failure.toolRequirement
+                failure_summaries.append({
+                    "requirement": req.description if hasattr(req, 'description') else 'Unknown',
+                    "error": failure.error
+                })
+
+            logger.warning(f"Session {session_id} has {len(failures)} generation failures")
+            logger.info(f"Stored {len(failure_ids)} failure records")
+
+            # Notify about failures
+            await self._notify_session_update(session_id, {
+                "type": "generation-failures",
+                "session_id": session_id,
+                "failure_count": len(failures),
+                "failures": failure_summaries
+            })
+
+        except Exception as e:
+            logger.error(f"Error storing generation failures for session {session_id}: {e}")
+            # Don't raise - we don't want this to fail the entire workflow
 
     async def _update_session_status(self, session_id: str, status: SessionStatus, error_message: Optional[str] = None):
         """Update session status and notify via WebSocket."""

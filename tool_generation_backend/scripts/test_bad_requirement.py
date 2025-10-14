@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 """
-Test script for the complete tool generation pipeline.
+Test script for bad requirements handling.
 
-This script demonstrates the end-to-end flow:
-1. Submit job via POST /api/v1/jobs
-2. Monitor job status
-3. Retrieve generated tool results
+This script tests various malformed/invalid requirements to verify the
+failure handling system works correctly.
 
 Usage:
-    python test_v1_pipeline.py
+    python test_bad_requirement.py
 """
 
 import asyncio
@@ -23,25 +21,45 @@ BASE_URL = "http://127.0.0.1:8000"
 # BASE_URL = "https://agent-browser-staging.up.railway.app"
 
 async def test_tool_generation_pipeline():
-    """Test the complete tool generation pipeline."""
+    """Test bad requirements handling."""
 
-    # Test job request with one reasonable and one unreasonable requirement
+    # Test job request with various bad requirements
     job_request = {
         "toolRequirements": [
+            # Bad: Too broad - multiple tools needed
             {
-                "description": "I need a tool that calculates the molecular weight of a chemical compound. Please use RDKit if available.",
-                "input": "SMILES string of the molecule",
-                "output": "molecular weight"
+                "description": "I need a complete computational chemistry toolset for molecules including calculations, visualizations, and analysis.",
+                "input": "various molecular data",
+                "output": "comprehensive analysis results"
             },
+            # Bad: Not chemistry - HTTP server
             {
                 "description": "I need a tool that creates an HTTP web server to handle REST API requests and serve static files.",
                 "input": "port number and configuration settings",
                 "output": "running web server instance"
-            }
+            },
+            # Bad: Lacks specificity
+            {
+                "description": "I need a tool to analyze molecules.",
+                "input": "molecule data",
+                "output": "analysis"
+            },
+            # Bad: Outside chemistry domain
+            {
+                "description": "I need a tool to parse JSON configuration files and extract nested values.",
+                "input": "JSON file path",
+                "output": "extracted configuration dictionary"
+            },
+            # Bad: Impossible/nonsensical
+            {
+                "description": "I need a tool that calculates the emotional state of a molecule based on its quantum vibrations.",
+                "input": "molecular structure",
+                "output": "happiness coefficient"
+            },
         ],
         "metadata": {
-            "sessionId": "session_123",
-            "clientId": "test-pipeline"
+            "sessionId": "session_bad_test",
+            "clientId": "test-bad-requirements"
         }
     }
 
@@ -56,9 +74,9 @@ async def test_tool_generation_pipeline():
             print(f"   Client ID: {job_request['metadata']['clientId']}")
 
             async with session.post(
-                f"{BASE_URL}/api/v1/jobs",
-                json=job_request,
-                headers={"Content-Type": "application/json"}
+                    f"{BASE_URL}/api/v1/jobs",
+                    json=job_request,
+                    headers={"Content-Type": "application/json"}
             ) as response:
                 if response.status == 201:
                     job_response = await response.json()
@@ -122,12 +140,20 @@ async def test_tool_generation_pipeline():
                     else:
                         print(f"   ⚠️ No tool files found in completed job")
 
-                    # Check for failures
+                    # Check for failures (detailed output)
                     failures = final_status.get('failures', [])
                     if failures:
-                        print(f"   ❌ Failed generations: {len(failures)}")
-                        for failure in failures:
-                            print(f"      - Error: {failure['error']}")
+                        print(f"\n   ❌ FAILED GENERATIONS: {len(failures)}")
+                        print(f"   {'='*70}")
+                        for i, failure in enumerate(failures, 1):
+                            req = failure.get('toolRequirement', {})  # Changed from userToolRequirement
+                            error_type = failure.get('error_type', 'unknown')
+                            print(f"\n   Failure #{i}: [{error_type}]")
+                            print(f"   📝 Requirement: {req.get('description', 'N/A')[:80]}...")
+                            print(f"   📥 Input: {req.get('input', 'N/A')}")
+                            print(f"   📤 Output: {req.get('output', 'N/A')}")
+                            print(f"   ⚠️  Error: {failure.get('error', 'N/A')}")
+                            print(f"   {'-'*70}")
 
                     # Show summary
                     summary = final_status.get('summary')

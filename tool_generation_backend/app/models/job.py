@@ -1,11 +1,8 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List
 
-class UserToolRequirement(BaseModel):
-    """Tool requirement as specified in design spec."""
-    description: str = Field(..., description="Natural language description of the tool")
-    input: str = Field(..., description="Natural language description of the input")
-    output: str = Field(..., description="Natural language description of the output")
+from .tool_generation import ToolGenerationFailure
+from .specs import UserToolRequirement
 
 
 class RequestMetadata(BaseModel):
@@ -39,12 +36,6 @@ class ToolFile(BaseModel):
     endpoint: Optional[str] = Field(None, description="SimpleTooling HTTP endpoint URL")
     registered: bool = Field(..., description="Whether registered with SimpleTooling")
     createdAt: str = Field(..., description="ISO timestamp")
-
-
-class ToolGenerationFailure(BaseModel):
-    """Failed tool generation information."""
-    userToolRequirement: UserToolRequirement
-    error: str
 
 
 class GenerationSummary(BaseModel):
