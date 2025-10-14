@@ -169,7 +169,8 @@ async def get_job_status(
             failures_response = [
                 ToolGenerationFailure(
                     toolRequirement=failure.user_requirement,
-                    error=failure.error_message
+                    error=failure.error_message,
+                    error_type=failure.error_type or "unknown"
                 )
                 for failure in tool_failures
             ]

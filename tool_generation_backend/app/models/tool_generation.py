@@ -41,6 +41,10 @@ class ToolGenerationFailure(BaseModel):
         serialization_alias="toolRequirement"  # Serialize with field name, not alias
     )
     error: str = Field(description="Error message explaining why generation failed")
+    error_type: str = Field(
+        default="unknown",
+        description="One or two words explaining why generation failed"
+    )
 
     class Config:
         populate_by_name = True  # Allow both field name and alias for input

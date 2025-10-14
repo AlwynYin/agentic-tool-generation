@@ -146,8 +146,9 @@ async def test_tool_generation_pipeline():
                         print(f"\n   ❌ FAILED GENERATIONS: {len(failures)}")
                         print(f"   {'='*70}")
                         for i, failure in enumerate(failures, 1):
-                            req = failure.get('userToolRequirement', {})
-                            print(f"\n   Failure #{i}:")
+                            req = failure.get('toolRequirement', {})  # Changed from userToolRequirement
+                            error_type = failure.get('error_type', 'unknown')
+                            print(f"\n   Failure #{i}: [{error_type}]")
                             print(f"   📝 Requirement: {req.get('description', 'N/A')[:80]}...")
                             print(f"   📥 Input: {req.get('input', 'N/A')}")
                             print(f"   📤 Output: {req.get('output', 'N/A')}")

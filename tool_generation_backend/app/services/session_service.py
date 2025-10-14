@@ -394,7 +394,7 @@ class SessionService:
                 await self.session_repo.add_tool_failure_id(session_id, failure_id)
 
                 # Collect summary for logging
-                req = failure.userToolRequirement
+                req = failure.toolRequirement
                 failure_summaries.append({
                     "requirement": req.description if hasattr(req, 'description') else 'Unknown',
                     "error": failure.error

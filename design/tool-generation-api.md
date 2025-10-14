@@ -146,8 +146,22 @@ interface ToolFile {
 #### `ToolGenerationFailure`
 ```typescript
 interface ToolGenerationFailure {
-    toolRequirement: ToolRequirement
-    error: string
+    toolRequirement: UserToolRequirement  // The requirement that failed
+    error: string                          // Detailed error message explaining why
+    error_type: string                     // Category: "too_broad", "not_chemistry", "lacks_specificity", "impossible", "unknown"
+}
+```
+
+**Example:**
+```json
+{
+    "toolRequirement": {
+        "description": "I need a tool that creates an HTTP web server to handle REST API requests and serve static files.",
+        "input": "port number and configuration settings",
+        "output": "running web server instance"
+    },
+    "error": "Not a chemistry computation: HTTP servers are infrastructure and outside this domain. Please request molecular calculations, structure analysis, or property predictions.",
+    "error_type": "not_chemistry"
 }
 ```
 

@@ -182,6 +182,7 @@ For each user requirement, decide:
    - Set `success: false`
    - Include the original `userToolRequirement` object
    - Provide a clear `error` message explaining why it cannot be implemented
+   - Provide a `error_type` message, containing one or two words classifying its problem
 
 Example failures:
 - "Requirement too broad: This describes multiple separate tools. Please specify individual computation tasks."

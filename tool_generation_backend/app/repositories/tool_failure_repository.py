@@ -37,13 +37,12 @@ class ToolFailureRepository(BaseRepository[ToolFailure]):
         """
         try:
             # Extract error type from error message if possible
-            error_type = self._categorize_error(failure.error)
 
             failure_data = {
                 "session_id": session_id,
-                "user_requirement": failure.userToolRequirement.model_dump() if hasattr(failure.userToolRequirement, 'model_dump') else failure.userToolRequirement,
+                "user_requirement": failure.toolRequirement.model_dump() if hasattr(failure.toolRequirement, 'model_dump') else failure.toolRequirement,
                 "error_message": failure.error,
-                "error_type": error_type
+                "error_type": failure.error_type,
             }
 
             failure_id = await self.create(failure_data)
@@ -53,31 +52,6 @@ class ToolFailureRepository(BaseRepository[ToolFailure]):
         except Exception as e:
             logger.error(f"Failed to create tool failure record: {e}")
             raise
-
-    def _categorize_error(self, error_message: str) -> Optional[str]:
-        """
-        Categorize error based on error message content.
-
-        Args:
-            error_message: Error message from failure
-
-        Returns:
-            Optional[str]: Error category
-        """
-        error_lower = error_message.lower()
-
-        if "too broad" in error_lower or "multiple" in error_lower:
-            return "too_broad"
-        elif "not a chemistry" in error_lower or "outside chemistry" in error_lower:
-            return "not_chemistry"
-        elif "lacks specificity" in error_lower or "not specific" in error_lower:
-            return "lacks_specificity"
-        elif "malformed" in error_lower:
-            return "malformed"
-        elif "impossible" in error_lower or "nonsensical" in error_lower:
-            return "impossible"
-        else:
-            return "unknown"
 
     async def get_by_session(self, session_id: str) -> List[ToolFailure]:
         """
