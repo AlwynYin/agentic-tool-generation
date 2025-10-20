@@ -323,12 +323,17 @@ class SessionService:
             tool_generation_results: List of ToolGenerationResult objects
         """
         try:
+            # Get session to retrieve job_id
+            session = await self.session_repo.get_by_id(session_id)
+            if not session:
+                raise ValueError(f"Session not found: {session_id}")
+
             tools_processed = []
             tool_ids = []
 
             for tool_res in tool_generation_results:
-                # Read generated code from file
-                file_path = os.path.join(self.settings.tools_path, tool_res.file_name)
+                # Read generated code from file (tools/<job_id>/<tool_name>.py)
+                file_path = os.path.join(self.settings.tools_path, session.job_id, tool_res.file_name)
                 with open(file_path, "r") as file:
                     tool_code = file.read()
 

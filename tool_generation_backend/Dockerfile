@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     git \
     ripgrep \
+    nano \
     && rm -rf /var/lib/apt/lists/*
 
 # Verify ripgrep installation
