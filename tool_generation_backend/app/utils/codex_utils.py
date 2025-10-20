@@ -145,18 +145,20 @@ async def execute_codex_implement(plan: ImplementationPlan) -> Dict[str, Any]:
 
 async def execute_codex_browse(
     library: str,
-    queries: List[str]
+    query: str
 ) -> ApiBrowseResult:
     """
     Execute Codex to browse/search documentation and extract API references.
 
     Args:
         library: Library name (rdkit, ase, pymatgen, pyscf)
-        queries: List of search queries for API documentation
+        query: Search query for API documentation
 
     Returns:
         ApiBrowseResult with structured API function references
     """
+    # Convert single query to list for internal processing
+    queries = [query]
 
     try:
         # Get repos path from settings

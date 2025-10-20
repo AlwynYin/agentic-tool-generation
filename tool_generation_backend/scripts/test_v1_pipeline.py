@@ -75,7 +75,7 @@ async def test_tool_generation_pipeline():
 
             # Step 2: Monitor job status
             print("\n2️⃣ Monitoring job status...")
-            max_attempts = 30  # 5 minutes with 10s intervals
+            max_attempts = 30  # 10 minutes with 20s intervals
             attempt = 0
 
             while attempt < max_attempts:
@@ -99,7 +99,7 @@ async def test_tool_generation_pipeline():
 
                 # Wait before next check
                 if attempt < max_attempts:
-                    await asyncio.sleep(10)
+                    await asyncio.sleep(20)
 
             # Step 3: Get final results (check final job status for toolFiles)
             print("\n3️⃣ Retrieving final job status...")

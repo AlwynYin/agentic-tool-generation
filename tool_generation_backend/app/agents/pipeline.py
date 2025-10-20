@@ -18,7 +18,7 @@ from app.models.session import ToolRequirement
 from app.models.tool_generation import ToolGenerationResult, ToolGenerationFailure, ToolGenerationOutput
 from app.memory.mongo_session import MongoSession
 from app.config import get_settings
-from app.agents.tools import implement_tool
+from app.agents.tools import implement_tool, browse_documentation
 
 logger = logging.getLogger(__name__)
 
@@ -44,17 +44,17 @@ class ToolGenerationPipeline:
     def _initialize_agent(self):
         """Initialize the tool generation agent."""
         try:
-            # Register our decorated tool function with the agent
+            # Register our decorated tool functions with the agent
             self._agent = Agent(
                 name="Chemistry Tool Generator",
                 instructions=self._get_agent_instructions(),
                 output_type=ToolGenerationOutput,
                 model=self.settings.openai_model,
-                tools=[implement_tool]  # Use the @function_tool decorated function
+                tools=[implement_tool, browse_documentation]
             )
             agents.set_default_openai_key(self.settings.openai_api_key)
 
-            logger.info("Initialized chemistry tool generation agent with implement_chemistry_tool")
+            logger.info("Initialized chemistry tool generation agent with implement_tool and browse_documentation")
 
         except Exception as e:
             logger.error(f"Failed to initialize agent: {e}")
@@ -150,8 +150,18 @@ You are a Computational Chemistry Expert. Your job is to analyze user requiremen
 
 ## Your Process:
 1. **Analyze**: Understand what the user wants to accomplish
-2. **Specify**: Define exact parameter names, types, and chemistry library functions
-3. **Implement**: Call the implement_chemistry_tool function with precise specifications
+2. **Browse**: Based on the requests from the user, call browse_documentation to search for relevant API documentation
+   - Identify which chemistry library is needed in the user's requirements (rdkit, ase, pyscf)
+   - Create a search query describing the functionality needed
+   - Call browse_documentation(library="...", query=['query_1', 'query_2', ...])
+3. **Plan**: Use the browse results to define exact specifications
+   - Define exact parameter names and types
+   - Identify specific library functions to use
+   - Note the api_refs file path from the browse result
+4. **Implement**: Call implement_tool with the specifications and api_refs
+   - Pass the ImplementationPlan object
+   - Notice that each implement call implements one tool, you can choose which browse result file the implementation agent should read
+   - Pass the api_refs list containing the documentation file path from step 2
 
 ## Requirements for tool specifications:
 - `tool_name`: Clear, descriptive name (snake_case)
@@ -165,6 +175,16 @@ You are a Computational Chemistry Expert. Your job is to analyze user requiremen
 - **ASE**: Atomic structure, calculations, optimization
 - **PyMatGen**: Materials science, crystal structures
 - **PySCF**: Quantum chemistry calculations
+
+Step-by-step example:
+1. User requirement: "calculate molecular weight from SMILES"
+2. You identify: Need RDKit library
+3. You call: `browse_documentation(library="rdkit", query="calculate molecular weight from SMILES")`
+4. Browse returns: JSON with result containing documentation file path
+5. You extract the file path from the result
+6. You MUST call: `implement_tool(requirement=ToolRequirement(...), api_refs=["searches/rdkit_xyz.md"])`
+
+IMPORTANT: Never skip the browse step. Even if you think you know the API, always browse first to get the latest documentation and pass the api_refs to implement_tool.
 
 ## Common Transformations:
 - "molecule" → `smiles: str` (SMILES string format)
