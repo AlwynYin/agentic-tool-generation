@@ -74,6 +74,21 @@ class ToolGenerationPipeline:
         self._ensure_agent()
 
         try:
+            # Fetch session from database to get job_id
+            from app.repositories.session_repository import SessionRepository
+            from app.agents.tools import _job_id_context
+
+            session_repo = SessionRepository()
+            session_data = await session_repo.get_by_id(session_id)
+
+            if not session_data:
+                raise ValueError(f"Session {session_id} not found in database")
+
+            # Set job_id in context for the implement_tool function
+            job_id = session_data.job_id
+            _job_id_context.set(job_id)
+            logger.info(f"Set job_id context: {job_id}")
+
             # Create MongoDB session for conversation history
             session = MongoSession(session_id)
 

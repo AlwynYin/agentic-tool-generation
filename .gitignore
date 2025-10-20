@@ -45,3 +45,4 @@ packages/*/src/**/*.js.map
 
 tool_service/tools/*
 tool_service/repos/*
+tool_service/searches/*

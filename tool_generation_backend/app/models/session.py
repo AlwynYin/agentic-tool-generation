@@ -43,6 +43,21 @@ class ToolRequirement(BaseModelConfig):
     )
 
 
+class ImplementationPlan(BaseModel):
+    """Plan for implementing a tool with Codex.
+
+    This model encapsulates all information needed to generate code for a tool,
+    including the job context, tool requirements, and API references.
+    """
+
+    job_id: str = Field(description="Job ID for organizing generated files")
+    requirement: ToolRequirement = Field(description="Tool requirement specification")
+    api_refs: List[str] = Field(
+        default_factory=list,
+        description="List of API reference file paths to use for implementation"
+    )
+
+
 class Session(DatabaseModel):
     """Session for tool generation or update workflow."""
 

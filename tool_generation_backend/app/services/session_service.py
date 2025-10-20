@@ -275,7 +275,7 @@ class SessionService:
                 raise ValueError(f"Session not found: {session_id}")
 
             # Create operation context and process through pipeline
-            output = await self.pipeline.process_tool_generation(session.job_id, session.tool_requirements)
+            output = await self.pipeline.process_tool_generation(session.id, session.tool_requirements)
 
             # Log summary
             logger.info(f"Generation complete: {output.success_count} successful, {output.failure_count} failed")

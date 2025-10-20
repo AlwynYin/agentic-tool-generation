@@ -4,11 +4,15 @@ FROM python:3.13-slim
 # Set working directory to match local structure
 WORKDIR /app/tool_generation_backend
 
-# Install system dependencies
+# Install system dependencies including ripgrep
 RUN apt-get update && apt-get install -y \
     curl \
     git \
+    ripgrep \
     && rm -rf /var/lib/apt/lists/*
+
+# Verify ripgrep installation
+RUN which rg && rg --version
 
 # Install Node.js for Codex CLI
 RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \

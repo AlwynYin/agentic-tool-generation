@@ -8,6 +8,7 @@ like implementing chemistry tools or updating existing ones.
 import logging
 import json
 from typing import Dict, Any, List, Optional
+from contextvars import ContextVar
 
 from agents import function_tool
 
@@ -15,14 +16,18 @@ from app.utils.codex_utils import (
     execute_codex_implement,
     execute_codex_browse
 )
-from app.models.session import ToolRequirement
+from app.models.session import ToolRequirement, ImplementationPlan
 from app.models.tool_generation import ToolGenerationResult
 
 logger = logging.getLogger(__name__)
 
+# Context variable for passing job_id through the agent execution
+# This is set by the pipeline before running the agent
+_job_id_context: ContextVar[Optional[str]] = ContextVar('job_id', default=None)
+
 
 @function_tool
-async def implement_tool(requirement: ToolRequirement) -> str:
+async def implement_tool(requirement: ToolRequirement, api_refs: Optional[List[str]] = None) -> str:
     """
     Implement a computation tool using Codex.
 
@@ -35,6 +40,7 @@ async def implement_tool(requirement: ToolRequirement) -> str:
             - type: a string specifying the type
             - description: a string
         - output_format: a list of output specifications, in ParameterSpec Objects.
+        api_refs (List[str]): List of API reference file paths to use for implementation (default: [])
 
     Returns:
         JSON string containing the result from codex
@@ -42,9 +48,22 @@ async def implement_tool(requirement: ToolRequirement) -> str:
     try:
         logger.info(f"Implementing chemistry tool: {requirement.name}")
         logger.debug(f"Received input: {requirement}")
+        logger.debug(f"API references: {api_refs}")
+
+        # Get job_id from context (set by pipeline)
+        job_id = _job_id_context.get()
+        if not job_id:
+            raise ValueError("job_id not found in context. Pipeline must set job_id before running agent.")
+
+        # Create implementation plan
+        plan = ImplementationPlan(
+            job_id=job_id,
+            requirement=requirement,
+            api_refs=api_refs or []
+        )
 
         # Use existing codex implementation
-        result = await execute_codex_implement(requirement)
+        result = await execute_codex_implement(plan)
 
         if result["success"]:
             logger.info(f"Successfully implemented chemistry tool: {requirement.name}")
@@ -142,19 +161,21 @@ Please implement the updated version incorporating these changes.
         }
 
 
-async def browse_chemistry_documentation(
-    library: str,
-    query: str
-) -> Dict[str, Any]:
+@function_tool
+async def browse_documentation(library: str, query: str) -> str:
     """
-    Browse chemistry library documentation.
+    Browse chemistry library documentation to find API references and examples.
+
+    Use this tool when you need to understand how to use specific functions from chemistry libraries
+    before implementing a tool. This helps you find the correct API usage patterns.
 
     Args:
-        library: Chemistry library name (rdkit, ase, pymatgen, pyscf)
-        query: Search query for specific functionality
+        library (str): Chemistry library name. Must be one of: rdkit, ase, pymatgen, pyscf
+        query (str): Search query describing what functionality you're looking for.
+                    Examples: "calculate molecular descriptors", "optimize geometry", "parse SMILES"
 
     Returns:
-        Documentation search result
+        JSON string containing the search results with API documentation and examples
     """
     try:
         logger.info(f"Browsing {library} documentation for: {query}")
@@ -163,16 +184,22 @@ async def browse_chemistry_documentation(
         result = await execute_codex_browse(library, query)
 
         logger.info(f"Successfully browsed {library} documentation")
-        return result
+
+        return json.dumps({
+            "success": True,
+            "library": library,
+            "query": query,
+            "result": result
+        })
 
     except Exception as e:
         logger.error(f"Error browsing {library} documentation: {e}")
-        return {
+        return json.dumps({
             "success": False,
             "error": str(e),
             "library": library,
             "query": query
-        }
+        })
 
 
 def _convert_input_spec_to_params(input_spec: Dict[str, Any]) -> List[Dict[str, Any]]:

@@ -16,9 +16,8 @@ from pathlib import Path
 from datetime import datetime
 
 from app.config import get_settings
-from app.models import ToolRequirement
-from app.models.session import ParameterSpec, OutputSpec
-from app.models.api_reference import ApiBrowseResult, ApiFunction, ApiExample
+from app.models import ToolRequirement, ImplementationPlan
+from app.models.api_reference import ApiBrowseResult
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -65,31 +64,31 @@ def authenticate_codex(api_key: str) -> bool:
         return False
 
 
-async def execute_codex_implement(requirement: ToolRequirement) -> Dict[str, Any]:
+async def execute_codex_implement(plan: ImplementationPlan) -> Dict[str, Any]:
     """
     Execute Codex to implement/generate code in tool_service directory.
 
     Args:
-        requirement: requirement of the tool
+        plan: Implementation plan containing job_id, requirement, and api_refs
 
     Returns:
         Dict with implementation result
     """
-    tool_name = requirement.name
+    tool_name = plan.requirement.name
 
     try:
         # Get configurable paths from settings
         from app.config import get_settings
         settings = get_settings()
 
-        # Get project root dynamically - go up 4 levels to reach agent-browser/
-        tools_dir = Path(settings.tool_service_dir)
+        # Get the actual tools directory path with job_id subdirectory (tool_service/tools/<job_id>)
+        tools_dir = Path(settings.tools_path) / plan.job_id
 
         # Ensure directories exist
         tools_dir.mkdir(parents=True, exist_ok=True)
 
         # Build the implementation prompt
-        prompt = _build_implementation_prompt(requirement, settings)
+        prompt = _build_implementation_prompt(plan.requirement, plan.api_refs, plan.job_id, settings)
 
         # Build command - change to tool_service directory first
         cmd = [
@@ -97,7 +96,7 @@ async def execute_codex_implement(requirement: ToolRequirement) -> Dict[str, Any
             "--model", "gpt-5",
             "--dangerously-bypass-approvals-and-sandbox",
             "--skip-git-repo-check",
-            "--cd", str(tools_dir),
+            "--cd", str(settings.tools_service_path),
             prompt
         ]
 
@@ -147,7 +146,7 @@ async def execute_codex_implement(requirement: ToolRequirement) -> Dict[str, Any
 async def execute_codex_browse(
     library: str,
     queries: List[str]
-):
+) -> ApiBrowseResult:
     """
     Execute Codex to browse/search documentation and extract API references.
 
@@ -188,10 +187,15 @@ async def execute_codex_browse(
         # Create output filename with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_filename = f"{library_lower}_api_refs_{timestamp}.json"
-        output_path = repos_dir / output_filename
+        output_path = Path(settings.searches_path) / output_filename
+        logger.debug(f"Constructed file name: {output_path}")
 
         # Build the browsing prompt with structured output requirements
         queries_text = "\n".join([f"  - {q}" for q in queries])
+
+        # Use relative paths since Codex will be running in tool_service directory
+        library_dir_relative = f"{settings.repos_dir}/{library_lower}"
+        output_path_relative = f"{settings.searchs_dir}/{output_filename}"
 
         browse_prompt = f"""You are tasked with extracting API function references from the {library} library documentation.
 
@@ -200,7 +204,7 @@ async def execute_codex_browse(
 </Navigation Guide>
 
 <Repository Location>
-{library_dir}
+{library_dir_relative}
 </Repository Location>
 
 <Queries>
@@ -243,7 +247,7 @@ Your task:
 ]
 
 IMPORTANT:
-- Save your output to: {output_path}
+- Save your output to: {output_path_relative}
 - Use valid JSON format
 - Include complete function signatures with accurate types
 - Provide working code examples
@@ -255,7 +259,7 @@ IMPORTANT:
             "--model", "gpt-5",
             "--dangerously-bypass-approvals-and-sandbox",
             "--skip-git-repo-check",
-            "--cd", str(repos_dir),
+            "--cd", str(settings.tools_service_path),
             browse_prompt
         ]
 
@@ -268,6 +272,7 @@ IMPORTANT:
                 success=False,
                 library=library,
                 queries=queries,
+                file_name='',
                 error=result["error"]
             )
 
@@ -279,55 +284,46 @@ IMPORTANT:
                 success=False,
                 library=library,
                 queries=queries,
+                file_name=str(output_filename),
                 error=f"Output file not created by Codex: {output_path}"
             )
 
-        # Parse the JSON output
+        # Read the JSON output as raw string
         try:
             with open(output_path, 'r') as f:
-                api_functions_data = json.load(f)
+                search_results_content = f.read()
 
-            # Validate and convert to Pydantic models
-            api_functions = []
-            for func_data in api_functions_data:
-                try:
-                    # Convert examples if present
-                    examples = []
-                    for ex in func_data.get('examples', []):
-                        examples.append(ApiExample(**ex))
+            # Validate it's valid JSON (but don't parse into objects)
+            try:
+                json.loads(search_results_content)
+            except json.JSONDecodeError as e:
+                logger.error(f"Invalid JSON in output file: {e}")
+                return ApiBrowseResult(
+                    success=False,
+                    library=library,
+                    queries=queries,
+                    file_name=str(output_filename),
+                    error=f"Invalid JSON in output file: {e}"
+                )
 
-                    api_func = ApiFunction(
-                        function_name=func_data['function_name'],
-                        description=func_data['description'],
-                        input_schema=[ParameterSpec(**p) for p in func_data.get('input_schema', [])],
-                        output_schema=OutputSpec(**func_data['output_schema']),
-                        examples=examples
-                    )
-                    api_functions.append(api_func)
-                except Exception as e:
-                    logger.warning(f"Failed to parse API function: {e}")
-                    logger.warning(f"Data: {func_data}")
-                    continue
-
-            logger.info(f"Successfully extracted {len(api_functions)} API functions")
+            logger.info(f"Successfully retrieved search results from {output_path}")
             return ApiBrowseResult(
                 success=True,
                 library=library,
                 queries=queries,
-                api_functions=api_functions,
+                file_name=str(output_filename),
+                search_results=search_results_content,
                 output_file=str(output_path)
             )
 
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse JSON output: {e}")
-            with open(output_path, 'r') as f:
-                content = f.read()
-            logger.error(f"File content: {content[:500]}")
+        except Exception as e:
+            logger.error(f"Failed to read output file: {e}")
             return ApiBrowseResult(
                 success=False,
                 library=library,
                 queries=queries,
-                error=f"Invalid JSON in output file: {e}"
+                file_name=str(output_filename),
+                error=f"Failed to read output file: {e}"
             )
 
     except Exception as e:
@@ -434,28 +430,50 @@ async def _run_codex_command(cmd: List[str], timeout: int = 120) -> Dict[str, An
         }
 
 
-def _build_implementation_prompt(requirement: ToolRequirement, settings) -> str:
+def _build_implementation_prompt(
+    requirement: ToolRequirement,
+    api_refs: List[str],
+    job_id: str,
+    settings
+) -> str:
     """
     Build a detailed implementation prompt for Codex.
 
     Args:
-        tool_name: Name of the tool to implement
-        requirements: List of requirement specifications
+        requirement: Tool requirement specification
+        api_refs: List of API reference file paths
+        job_id: Job ID for organizing tool files
+        settings: Application settings
 
     Returns:
         Formatted prompt string
     """
     # Start building the prompt
+    # Use relative paths since Codex will be running in tool_service directory
     tool_name = requirement.name
+    tools_dir_relative = f"{settings.tools_dir}/{job_id}"
+
     prompt_parts = [
-        f"Create a Python tool file named {settings.tools_dir}/{tool_name}.py with the following requirement:",
+        f"Create a Python tool file named {tools_dir_relative}/{tool_name}.py with the following requirement:",
         "",
+    ]
+
+    if api_refs:
+        prompt_parts.extend([
+            "## Api References:",
+            "In this file are Api references that may be helpful, inspect this file before implementation",
+            *api_refs
+        ])
+
+
+    prompt_parts.extend([
         "## Tool Requirement:",
         f"### Function: {requirement.name}",
         f"**Description:** {requirement.description}",
         "",
         "**Parameters:**"
-    ]
+    ])
+
     for input_spec in requirement.input_format:
         prompt_parts.extend([
             f"name: {input_spec.name}",
@@ -479,11 +497,11 @@ def _build_implementation_prompt(requirement: ToolRequirement, settings) -> str:
         "3. Return results in a structured format with success/error indicators",
         "4. Include chemistry-specific validation where appropriate",
         "5. Use appropriate chemistry libraries (rdkit, ase, pymatgen, pyscf) as needed",
-        f"6. Check {settings.tools_dir}/template.txt for a template"
+        f"6. Check {settings.tools_dir}/template.txt for a template (if available)",
         "",
         "",
         "Generate the complete, production-ready tool implementation.",
-        f"Save the file as {settings.tools_dir}/{tool_name}.py"
+        f"Save the file as {tools_dir_relative}/{tool_name}.py"
     ])
 
     return "\n".join(prompt_parts)
