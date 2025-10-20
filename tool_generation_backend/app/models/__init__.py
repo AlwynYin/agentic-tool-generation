@@ -5,6 +5,7 @@ from .specs import ParameterSpec, OutputSpec, UserToolRequirement
 from .session import (
     SessionStatus,
     ToolRequirement,
+    ImplementationPlan,
     Session,
     SessionCreate,
     SessionUpdate,
@@ -25,7 +26,6 @@ from .tool import (
 )
 from .api_reference import (
     ApiQuery,
-    ApiFunction,
     ApiExample,
     ApiBrowseResult,
 )
@@ -48,6 +48,7 @@ __all__ = [
     # Session models
     "SessionStatus",
     "ToolRequirement",
+    "ImplementationPlan",
     "Session",
     "SessionCreate",
     "SessionUpdate",
@@ -66,7 +67,6 @@ __all__ = [
     "ToolListResponse",
     # API Reference models
     "ApiQuery",
-    "ApiFunction",
     "ApiExample",
     "ApiBrowseResult",
     # Tool Generation models

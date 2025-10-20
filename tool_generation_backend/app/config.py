@@ -87,6 +87,23 @@ class Settings(BaseSettings):
         description="Directory name for generated tools (relative to tool_service_dir)"
     )
 
+    repos_dir: str = Field(
+        default="repos",
+        env="REPOS_DIR",
+        description="Directory name for repositories (relative to tool_service_dir)"
+    )
+
+    searchs_dir: str = Field(
+        default="searches",
+        env="SEARCHES_DIR",
+        description="Directory for search results (relative to tool_service_dir)"
+    )
+
+    @property
+    def tools_service_path(self) -> str:
+        """Get the full tools directory path."""
+        return f"{self.tool_service_dir}"
+
     @property
     def tools_path(self) -> str:
         """Get the full tools directory path."""
@@ -95,7 +112,12 @@ class Settings(BaseSettings):
     @property
     def repos_path(self) -> str:
         """Get the repos directory path for library documentation."""
-        return f"{self.tool_service_dir}/repos"
+        return f"{self.tool_service_dir}/{self.repos_dir}"
+
+    @property
+    def searches_path(self) -> str:
+        """Get the repos directory path for library documentation."""
+        return f"{self.tool_service_dir}/{self.searchs_dir}"
 
     class Config:
         env_file = ".env"

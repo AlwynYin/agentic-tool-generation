@@ -27,32 +27,16 @@ class ApiExample(BaseModel):
     )
 
 
-class ApiFunction(BaseModel):
-    """API function reference with complete signature and examples."""
-
-    function_name: str = Field(description="Full function name (e.g., 'rdkit.Chem.Descriptors.MolWt')")
-    description: str = Field(description="Function description")
-    input_schema: List[ParameterSpec] = Field(
-        description="List of input parameters with types and descriptions"
-    )
-    output_schema: OutputSpec = Field(
-        description="Output type and description"
-    )
-    examples: List[ApiExample] = Field(
-        default_factory=list,
-        description="List of usage examples"
-    )
-
-
 class ApiBrowseResult(BaseModel):
     """Result from browsing API documentation."""
 
     success: bool = Field(description="Whether the browse operation succeeded")
     library: str = Field(description="Library name (e.g., 'rdkit')")
     queries: List[str] = Field(description="Queries that were searched")
-    api_functions: List[ApiFunction] = Field(
-        default_factory=list,
-        description="List of API functions found"
+    file_name: str = Field(default="", description="File name of the json file containing browse result")
+    search_results: str = Field(
+        default="",
+        description="Raw JSON string content of the search results"
     )
     error: Optional[str] = Field(
         default=None,
