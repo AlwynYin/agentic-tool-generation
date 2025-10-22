@@ -139,22 +139,63 @@ class ToolGenerationPipeline:
 
         return message
 
+    def _load_registered_libraries(self) -> List[str]:
+        """
+        Load list of registered libraries from repos directory.
+
+        Returns:
+            List of library names that have navigation guides
+        """
+        try:
+            repos_path = Path(self.settings.repos_path)
+            if not repos_path.exists():
+                logger.warning(f"Repos directory not found: {repos_path}")
+                return []
+
+            # Find all .md navigation guide files
+            registered_libs = []
+            for guide_file in repos_path.glob("*.md"):
+                lib_name = guide_file.stem  # Filename without .md extension
+                registered_libs.append(lib_name)
+
+            logger.info(f"Found {len(registered_libs)} registered libraries: {registered_libs}")
+            return registered_libs
+
+        except Exception as e:
+            logger.error(f"Error loading registered libraries: {e}")
+            return []
+
     def _get_agent_instructions(self) -> str:
         """Get system instructions for the single tool generation agent."""
-        return """
+        # Load registered libraries dynamically
+        registered_libs = self._load_registered_libraries()
+
+        # Build library list
+        if registered_libs:
+            libs_text = "\n".join([f"- **{lib}** (package: `{lib}`)" for lib in registered_libs])
+            browse_note = f"\n\n**Available for browsing:** {', '.join(registered_libs)}\n\nYou can browse documentation for any of these libraries using the `browse_documentation` tool."
+        else:
+            # Fallback to hardcoded list if no registered libraries found
+            libs_text = """- **rdkit** (package: `rdkit`): Molecular manipulation, descriptors, fingerprints
+- **ase** (package: `ase`): Atomic structure, calculations, optimization
+- **pyscf** (package: `pyscf`): Quantum chemistry calculations
+- **orca-pi** (package: `opi`): ORCA python interface"""
+            browse_note = ""
+
+        return f"""
 You are a Computational Chemistry Expert. Your job is to analyze user requirements and create precise computational chemistry tools.
 
 ## Tool
-- A Tool is a python function that does one single computation task, with a well-typed and documented input and output schema. 
+- A Tool is a python function that does one single computation task, with a well-typed and documented input and output schema.
 - The tool should not be over-complicated and have multiple capabilities. If there's multiple separate jobs, there should be multiple separate tools.
 - The tool should be completely stateless. This means that it should not use any global state, and should not modify anything from the outer scope. It should output from, and only from, python's `return` statement. It should not modify the input.
 
 ## Your Process:
 1. **Analyze**: Understand what the user wants to accomplish
 2. **Browse**: Based on the requests from the user, call browse_documentation to search for relevant API documentation
-   - Identify which chemistry library is needed in the user's requirements (rdkit, ase, pyscf)
+   - Identify which library is needed in the user's requirements
    - Create a search query describing the functionality needed
-   - Call browse_documentation(library="...", query=['query_1', 'query_2', ...])
+   - Call browse_documentation(library="<repository_a>" query="["query_1_for_repository_a", "query_2_for_repository_a"]") for the repositories available
 3. **Plan**: Use the browse results to define exact specifications
    - Define exact parameter names and types
    - Identify specific library functions to use
@@ -171,13 +212,10 @@ You are a Computational Chemistry Expert. Your job is to analyze user requiremen
 - `output_spec`: JSON schema for return values
 - `chemistry_libraries`: List of specific chemistry libraries needed
 
-## Chemistry Libraries Available:
-The following chemistry packages are available in the execution environment:
+## Libraries Available:
+The following packages are available in the execution environment:
 
-- **rdkit** (package: `rdkit`): Molecular manipulation, descriptors, fingerprints
-- **ase** (package: `ase`): Atomic structure, calculations, optimization
-- **pyscf** (package: `pyscf`): Quantum chemistry calculations
-- **orca-pi** (package: `opi`): ORCA python interface
+{libs_text}{browse_note}
 
 
 Step-by-step example:
