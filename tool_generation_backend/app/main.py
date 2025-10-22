@@ -16,9 +16,11 @@ from app.database import init_database
 from app.api.health import router as health_router
 from app.api.sessions import router as sessions_router
 from app.api.jobs import router as jobs_router
+from app.api.repositories import router as repositories_router
 from app.websocket.manager import WebSocketManager
 from app.middleware.logging import setup_logging_middleware
 from app.utils.codex_utils import authenticate_codex
+from app.services.repository_service import RepositoryService
 
 
 @asynccontextmanager
@@ -47,6 +49,22 @@ async def lifespan(app: FastAPI):
     app.state.websocket_manager = WebSocketManager()
     logging.info("🔌 WebSocket manager initialized")
 
+    # Check repository status and warn about missing navigation guides
+    repo_service = RepositoryService()
+    repo_service.load_package_config()
+    missing_guides = repo_service.check_missing_guides()
+
+    if missing_guides:
+        logging.warning(f"⚠️  {len(missing_guides)} packages missing navigation guides: {', '.join(missing_guides)}")
+        logging.info(f"💡 Use POST /api/v1/repositories/register-all to register missing packages")
+    else:
+        logging.info("✅ All configured packages have navigation guides")
+
+    # Log overall repository status
+    status = repo_service.get_repository_status()
+    repos_downloaded = sum(1 for s in status if s.repo_exists)
+    guides_present = sum(1 for s in status if s.has_navigation_guide)
+    logging.info(f"📦 Repository status: {repos_downloaded}/{len(status)} repos downloaded, {guides_present}/{len(status)} guides present")
     yield
 
     # Shutdown
@@ -83,6 +101,7 @@ setup_logging_middleware(app, settings)
 app.include_router(health_router, prefix="/api/v1", tags=["health"])
 app.include_router(sessions_router, prefix="/api/v1/sessions", tags=["sessions"])
 app.include_router(jobs_router, prefix="/api/v1/jobs", tags=["jobs"])
+app.include_router(repositories_router, prefix="/api/v1/repositories", tags=["repositories"])
 
 
 @app.get("/")
