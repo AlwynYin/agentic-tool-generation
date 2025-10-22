@@ -35,6 +35,14 @@ from .tool_generation import (
     ToolGenerationOutput,
 )
 from .tool_failure import ToolFailure
+from .repository import (
+    PackageConfig,
+    RepositoryInfo,
+    RepositoryRegistrationRequest,
+    RepositoryRegistrationResult,
+    RepositoryRegistrationResponse,
+    RepositoryRegistrationOutput,
+)
 
 __all__ = [
     # Base models
@@ -75,4 +83,11 @@ __all__ = [
     "ToolGenerationOutput",
     # Tool Failure models
     "ToolFailure",
+    # Repository models
+    "PackageConfig",
+    "RepositoryInfo",
+    "RepositoryRegistrationRequest",
+    "RepositoryRegistrationResult",
+    "RepositoryRegistrationResponse",
+    "RepositoryRegistrationOutput",
 ]

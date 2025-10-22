@@ -9,6 +9,7 @@ history through MongoDB sessions.
 import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
+from pathlib import Path
 
 import agents
 from agents import Agent, Runner
@@ -171,10 +172,13 @@ You are a Computational Chemistry Expert. Your job is to analyze user requiremen
 - `chemistry_libraries`: List of specific chemistry libraries needed
 
 ## Chemistry Libraries Available:
-- **RDKit**: Molecular manipulation, descriptors, fingerprints
-- **ASE**: Atomic structure, calculations, optimization
-- **PyMatGen**: Materials science, crystal structures
-- **PySCF**: Quantum chemistry calculations
+The following chemistry packages are available in the execution environment:
+
+- **rdkit** (package: `rdkit`): Molecular manipulation, descriptors, fingerprints
+- **ase** (package: `ase`): Atomic structure, calculations, optimization
+- **pyscf** (package: `pyscf`): Quantum chemistry calculations
+- **orca-pi** (package: `opi`): ORCA python interface
+
 
 Step-by-step example:
 1. User requirement: "calculate molecular weight from SMILES"
