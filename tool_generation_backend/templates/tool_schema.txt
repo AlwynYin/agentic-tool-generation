@@ -83,7 +83,12 @@ if __name__ == "__main__":
   - Always return a dictionary with "success" boolean
   - Include error handling with structured error responses
   - Provide metadata about the operation
-3. Execution Guard:
+
+3. File System Access:
+  - Tools can read from the file system when parameters specify file paths
+  - Handle FileNotFoundError and other I/O exceptions appropriately
+
+4. Execution Guard:
   - Include if __name__ == "__main__": block for testing
   - No code should execute at module level during import
 
