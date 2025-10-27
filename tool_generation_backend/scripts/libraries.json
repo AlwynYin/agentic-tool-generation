@@ -1,0 +1,57 @@
+{
+"rdkit": {
+"description": "RDKit cheminformatics toolkit"
+},
+"ase": {
+"pip_name": "ase",
+"description": "Atomic Simulation Environment"
+},
+"pymatgen": {
+"pip_name": "pymatgen",
+"description": "Python Materials Genomics"
+},
+"openmm": {
+"pip_name": "openmm",
+"description": "OpenMM molecular dynamics"
+},
+"mdtraj": {
+"pip_name": "mdtraj",
+"description": "MDTraj trajectory analysis"
+},
+"pyscf": {
+"pip_name": "pyscf",
+"description": "Python-based quantum chemistry"
+},
+"cclib": {
+"pip_name": "cclib",
+"description": "Computational chemistry library"
+},
+"nglview": {
+"pip_name": "nglview",
+"description": "Molecular visualization in Jupyter"
+},
+"numpy": {
+"pip_name": "numpy",
+"description": "Numerical computing"
+},
+"pandas": {
+"pip_name": "pandas",
+"description": "Data analysis library"
+},
+"scipy": {
+"pip_name": "scipy",
+"description": "Scientific computing"
+},
+"matplotlib": {
+"pip_name": "matplotlib",
+"description": "Plotting library"
+},
+"plotly": {
+"pip_name": "plotly",
+"description": "Interactive plotting"
+},
+"sympy": {
+"pip_name": "sympy",
+"description": "Symbolic mathematics"
+}
+}
