@@ -66,15 +66,15 @@ async def _create_indexes() -> None:
 
     try:
         # Import repositories here to avoid circular imports
-        from app.repositories.session_repository import SessionRepository
+        from app.repositories.task_repository import TaskRepository
         from app.repositories.tool_repository import ToolRepository
 
         # Create repository instances
-        session_repo = SessionRepository()
+        task_repo = TaskRepository()
         tool_repo = ToolRepository()
 
         # Ensure indexes for each collection
-        await session_repo.ensure_indexes()
+        await task_repo.ensure_indexes()
         await tool_repo.ensure_indexes()
 
         logging.info("✅ All database indexes created successfully")

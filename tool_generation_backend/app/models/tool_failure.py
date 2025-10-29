@@ -14,7 +14,7 @@ class ToolFailure(DatabaseModel):
     Record of a failed tool generation attempt.
     Stored in separate collection from successful tools.
     """
-    session_id: str = Field(description="Session that attempted to generate this tool")
+    task_id: str = Field(description="Task that attempted to generate this tool")
     user_requirement: UserToolRequirement = Field(
         description="Original user requirement that failed"
     )

@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.database import init_database
 from app.api.health import router as health_router
-from app.api.sessions import router as sessions_router
+# from app.api.tasks import router as task_router # temporarily removed
 from app.api.jobs import router as jobs_router
 from app.api.repositories import router as repositories_router
 from app.websocket.manager import WebSocketManager
@@ -99,7 +99,7 @@ setup_logging_middleware(app, settings)
 
 # Include API routers
 app.include_router(health_router, prefix="/api/v1", tags=["health"])
-app.include_router(sessions_router, prefix="/api/v1/sessions", tags=["sessions"])
+# app.include_router(task_router, prefix="/api/v1/sessions", tags=["sessions"])
 app.include_router(jobs_router, prefix="/api/v1/jobs", tags=["jobs"])
 app.include_router(repositories_router, prefix="/api/v1/repositories", tags=["repositories"])
 

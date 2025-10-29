@@ -8,7 +8,7 @@ from enum import Enum
 from pydantic import Field
 
 from .base import BaseModelConfig, DatabaseModel
-from .session import ParameterSpec, OutputSpec
+from .task import ParameterSpec, OutputSpec
 
 
 class ToolStatus(str, Enum):
@@ -48,8 +48,8 @@ class Tool(DatabaseModel):
         default=ToolStatus.DRAFT,
         description="Tool status"
     )
-    session_id: str = Field(
-        description="Last session that used/updated this tool"
+    task_id: str = Field(
+        description="Last task that used/updated this tool"
     )
 
 

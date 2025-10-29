@@ -69,7 +69,7 @@ async def execute_codex_implement(plan: ImplementationPlan) -> Dict[str, Any]:
     Execute Codex to implement/generate code in tool_service directory.
 
     Args:
-        plan: Implementation plan containing job_id, requirement, and api_refs
+        plan: Implementation plan containing job_id, task_id, requirement, and api_refs
 
     Returns:
         Dict with implementation result
@@ -81,14 +81,14 @@ async def execute_codex_implement(plan: ImplementationPlan) -> Dict[str, Any]:
         from app.config import get_settings
         settings = get_settings()
 
-        # Get the actual tools directory path with job_id subdirectory (tool_service/tools/<job_id>)
-        tools_dir = Path(settings.tools_path) / plan.job_id
+        # Get the actual tools directory path with job_id and task_id subdirectories (tool_service/tools/<job_id>/<task_id>)
+        tools_dir = Path(settings.tools_path) / plan.job_id / plan.task_id
 
         # Ensure directories exist
         tools_dir.mkdir(parents=True, exist_ok=True)
 
         # Build the implementation prompt
-        prompt = _build_implementation_prompt(plan.requirement, plan.api_refs, plan.job_id, settings)
+        prompt = _build_implementation_prompt(plan.requirement, plan.api_refs, plan.job_id, plan.task_id, settings)
 
         # Build command - change to tool_service directory first
         cmd = [
@@ -436,6 +436,7 @@ def _build_implementation_prompt(
     requirement: ToolRequirement,
     api_refs: List[str],
     job_id: str,
+    task_id: str,
     settings
 ) -> str:
     """
@@ -445,6 +446,7 @@ def _build_implementation_prompt(
         requirement: Tool requirement specification
         api_refs: List of API reference file paths
         job_id: Job ID for organizing tool files
+        task_id: Task ID for organizing tool files
         settings: Application settings
 
     Returns:
@@ -453,7 +455,7 @@ def _build_implementation_prompt(
     # Start building the prompt
     # Use relative paths since Codex will be running in tool_service directory
     tool_name = requirement.name
-    tools_dir_relative = f"{settings.tools_dir}/{job_id}"
+    tools_dir_relative = f"{settings.tools_dir}/{job_id}/{task_id}"
 
     prompt_parts = [
         f"Create a Python tool file named {tools_dir_relative}/{tool_name}.py with the following requirement:",

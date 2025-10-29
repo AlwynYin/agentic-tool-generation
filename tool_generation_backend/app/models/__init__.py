@@ -2,14 +2,14 @@
 
 from .base import BaseModelConfig, TimestampedModel, DatabaseModel
 from .specs import ParameterSpec, OutputSpec, UserToolRequirement
-from .session import (
-    SessionStatus,
+from .task import (
+    TaskStatus,
     ToolRequirement,
     ImplementationPlan,
-    Session,
-    SessionCreate,
-    SessionUpdate,
-    SessionResponse,
+    Task,
+    TaskCreate,
+    TaskUpdate,
+    TaskResponse,
 )
 # Agent models removed - using OpenAI Agent SDK
 from .tool import (

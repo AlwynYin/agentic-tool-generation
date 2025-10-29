@@ -15,11 +15,12 @@ import agents
 from agents import Agent, Runner
 
 from app.models import UserToolRequirement
-from app.models.session import ToolRequirement
+from app.models.task import ToolRequirement
 from app.models.tool_generation import ToolGenerationResult, ToolGenerationFailure, ToolGenerationOutput
 from app.memory.mongo_session import MongoSession
 from app.config import get_settings
-from app.agents.tools import implement_tool, browse_documentation
+from app.agents.tools import implement_tool, browse_documentation, _task_id_context, _job_id_context
+from app.repositories.task_repository import TaskRepository
 
 logger = logging.getLogger(__name__)
 
@@ -61,51 +62,50 @@ class ToolGenerationPipeline:
             logger.error(f"Failed to initialize agent: {e}")
             raise
 
-    async def process_tool_generation(self, session_id: str, requests: List[UserToolRequirement]) -> ToolGenerationOutput:
+    async def process_tool_generation(self, task_id: str, requirement: UserToolRequirement) -> ToolGenerationOutput:
         """
-        Process tool generation operation using the OpenAI Agent.
+        Process tool generation operation for a SINGLE tool using the OpenAI Agent.
 
         Args:
-            session_id: The session id of the tool generation request.
-            requests: List of User Tool Requirements.
+            task_id: The task id of the tool generation request.
+            requirement: Single User Tool Requirement.
 
         Returns:
-            ToolGenerationOutput with results and failures
+            ToolGenerationOutput with either one result or one failure
         """
         self._ensure_agent()
 
         try:
-            # Fetch session from database to get job_id
-            from app.repositories.session_repository import SessionRepository
-            from app.agents.tools import _job_id_context
+            # Fetch task from database to get job_id and task_id
+            task_repo = TaskRepository()
+            task_data = await task_repo.get_by_id(task_id)
 
-            session_repo = SessionRepository()
-            session_data = await session_repo.get_by_id(session_id)
+            if not task_data:
+                raise ValueError(f"Task {task_id} not found in database")
 
-            if not session_data:
-                raise ValueError(f"Session {session_id} not found in database")
-
-            # Set job_id in context for the implement_tool function
-            job_id = session_data.job_id
+            # Set task_id and job_id in context for the implement_tool function
+            job_id = task_data.job_id
+            task_id_str = task_data.task_id
+            _task_id_context.set(task_id_str)
             _job_id_context.set(job_id)
-            logger.info(f"Set job_id context: {job_id}")
+            logger.info(f"Set context - task_id: {task_id_str}, job_id: {job_id}")
 
             # Create MongoDB session for conversation history
-            session = MongoSession(session_id)
+            mongo_session = MongoSession(task_id)
 
-            logger.info(f"Processing implement operation for session {session_id}")
+            logger.info(f"Processing single tool generation for task {task_id}")
 
             # Build message for the agent
-            message = self._build_user_requirements_message(requests)
+            message = self._build_user_requirements_message(requirement)
 
             # Use agent to analyze requirements and call implement_chemistry_tool
             result = await Runner.run(
                 starting_agent=self._agent,
                 input=message,
-                session=session
+                session=mongo_session
             )
 
-            logger.info(f"Agent execution completed for session {session_id}")
+            logger.info(f"Agent execution completed for task {task_id}")
             logger.debug(f"Result: {result}")
 
             # Extract tool generation output
@@ -118,26 +118,25 @@ class ToolGenerationPipeline:
             logger.error(f"Error processing operation: {e}")
             raise
 
-    def _build_user_requirements_message(self, tools: List[UserToolRequirement]) -> str:
+    def _build_user_requirements_message(self, tool: UserToolRequirement) -> str:
         """
-        Build message for the agent with user requirements.
+        Build message for the agent with a single user requirement.
 
         Args:
-            context: Operation context with user requirements
+            tool: Single User Tool Requirement
 
         Returns:
             Formatted message for the agent
         """
-        message = f"Generate {len(tools)} chemistry computation tools based on these requirements:\n\n"
+        messages = [
+            "Generate ONE chemistry computation tool based on this requirement:\n\n",
+            f"Description: {tool.description}\n",
+            f"Input: {tool.input}\n",
+            f"Output: {tool.output}\n\n",
+            "Please analyze this requirement, create a precise specification with exact parameter names and types, then call implement_tool."
+        ]
 
-        for i, tool in enumerate(tools, 1):
-            message += f"{i}. Description: {tool.description}\n"
-            message += f"   Input: {tool.input}\n"
-            message += f"   Output: {tool.output}\n\n"
-
-        message += "Please analyze each requirement, create precise specifications with exact parameter names and types, then call implement_chemistry_tool for each one."
-
-        return message
+        return ''.join(messages)
 
     def _load_registered_libraries(self) -> List[str]:
         """
@@ -183,26 +182,24 @@ class ToolGenerationPipeline:
             browse_note = ""
 
         return f"""
-You are a Computational Chemistry Expert. Your job is to analyze user requirements and create precise computational chemistry tools.
+You are a Computational Chemistry Expert. Your job is to analyze a single user requirement and create ONE precise computational chemistry tool.
 
 ## Tool
 - A Tool is a python function that does one single computation task, with a well-typed and documented input and output schema.
-- The tool should not be over-complicated and have multiple capabilities. If there's multiple separate jobs, there should be multiple separate tools.
 - The tool should be completely stateless. This means that it should not use any global state, and should not modify anything from the outer scope. It should output from, and only from, python's `return` statement. It should not modify the input.
 
 ## Your Process:
-1. **Analyze**: Understand what the user wants to accomplish
-2. **Browse**: Based on the requests from the user, call browse_documentation to search for relevant API documentation
-   - Identify which library is needed in the user's requirements
+1. **Analyze**: Understand what the user wants to accomplish with THIS ONE tool
+2. **Browse**: Call browse_documentation to search for relevant API documentation
+   - Identify which library is needed for this requirement
    - Create a search query describing the functionality needed
-   - Call browse_documentation(library="<repository_a>" query="["query_1_for_repository_a", "query_2_for_repository_a"]") for the repositories available
+   - Call browse_documentation(library="<library_name>", query="<search_query>")
 3. **Plan**: Use the browse results to define exact specifications
    - Define exact parameter names and types
    - Identify specific library functions to use
    - Note the api_refs file path from the browse result
-4. **Implement**: Call implement_tool with the specifications and api_refs
-   - Pass the ImplementationPlan object
-   - Notice that each implement call implements one tool, you can choose which browse result file the implementation agent should read
+4. **Implement**: Call implement_tool ONCE with the specifications and api_refs
+   - Pass the ToolRequirement object with precise specifications
    - Pass the api_refs list containing the documentation file path from step 2
 
 ## Requirements for tool specifications:
@@ -246,16 +243,16 @@ When you encounter a malformed requirement, DO NOT attempt to implement it.
 
 ## Output Specifications:
 You MUST return a ToolGenerationOutput object with two fields:
-- `results`: List of successfully generated tools (ToolGenerationResult objects)
-- `failures`: List of failed requirements (ToolGenerationFailure objects)
+- `results`: List containing EITHER one successfully generated tool (ToolGenerationResult object) OR empty list
+- `failures`: List containing EITHER one failure (ToolGenerationFailure object) OR empty list
 
-For each user requirement, decide:
+For the single user requirement, decide:
 
-1. **If the requirement is valid** → Call implement_chemistry_tool, then add a ToolGenerationResult to `results`:
+1. **If the requirement is valid** → Call implement_tool, then add ONE ToolGenerationResult to `results`:
    - Set `success: true`
    - Include all required fields: name, file_name, description, input_schema, output_schema, dependencies
 
-2. **If the requirement is malformed/invalid** → Add a ToolGenerationFailure to `failures`:
+2. **If the requirement is malformed/invalid** → Add ONE ToolGenerationFailure to `failures`:
    - Set `success: false`
    - Include the original `userToolRequirement` object
    - Provide a clear `error` message explaining why it cannot be implemented
@@ -266,25 +263,25 @@ Example failures:
 - "Not a chemistry computation: HTTP servers are not chemistry tools. Please request molecular calculations, structure analysis, or property predictions."
 - "Lacks specificity: 'analyze molecules' could mean many things. Please specify which molecular properties or analyses you need."
 
-IMPORTANT: Every user requirement must appear in either `results` OR `failures`. The total count must match the number of requirements.
+IMPORTANT: The requirement must appear in EITHER `results` (as 1 item) OR `failures` (as 1 item), never both.
 
 Transform user descriptions into production-ready tool specifications and implement them.
 """
 
-    async def cleanup_session(self, session_id: str):
-        """Clean up resources for a session."""
+    async def cleanup_task(self, task_id: str):
+        """Clean up resources for a task."""
         try:
-            session = MongoSession(session_id)
-            await session.close()
-            logger.info(f"Cleaned up pipeline session {session_id}")
+            mongo_session = MongoSession(task_id)
+            await mongo_session.close()
+            logger.info(f"Cleaned up pipeline task {task_id}")
         except Exception as e:
-            logger.error(f"Error cleaning up pipeline session {session_id}: {e}")
+            logger.error(f"Error cleaning up pipeline task {task_id}: {e}")
 
-    async def get_session_info(self, session_id: str) -> Dict[str, Any]:
-        """Get session information and conversation history."""
+    async def get_task_info(self, task_id: str) -> Dict[str, Any]:
+        """Get task information and conversation history."""
         try:
-            session = MongoSession(session_id)
-            return await session.get_session_info()
+            mongo_session = MongoSession(task_id)
+            return await mongo_session.get_task_info()
         except Exception as e:
-            logger.error(f"Error getting pipeline session info for {session_id}: {e}")
-            return {"session_id": session_id, "error": str(e)}
+            logger.error(f"Error getting pipeline task info for {task_id}: {e}")
+            return {"task_id": task_id, "error": str(e)}

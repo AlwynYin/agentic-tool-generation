@@ -5,7 +5,7 @@ API Reference models for documentation browsing and extraction.
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 
-from .session import ParameterSpec, OutputSpec
+from .task import ParameterSpec, OutputSpec
 
 
 class ApiQuery(BaseModel):
