@@ -21,6 +21,7 @@ from app.repositories.task_repository import TaskRepository
 from app.repositories.tool_repository import ToolRepository
 from app.repositories.tool_failure_repository import ToolFailureRepository
 from app.agents.pipeline import ToolGenerationPipeline
+from app.agents.pipeline_v2 import ToolGenerationPipelineV2
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -49,12 +50,19 @@ class TaskService:
         self.tool_repo = tool_repo
         self.tool_failure_repo = tool_failure_repo or ToolFailureRepository()
 
-        # Initialize Chemistry Tool Pipeline
-        self.pipeline = ToolGenerationPipeline()
+        # Initialize settings
+        self.settings = get_settings()
+
+        # Initialize Chemistry Tool Pipeline (V1 or V2 based on config)
+        # if self.settings.pipeline_version == "v2":
+        #     logger.info("Using Pipeline V2 (multi-agent iterative)")
+        self.pipeline = ToolGenerationPipelineV2()
+        # else:
+        #     logger.info("Using Pipeline V1 (single-agent)")
+        #     self.pipeline = ToolGenerationPipeline()
 
         self.websocket_manager = websocket_manager
         self.active_workflows: Dict[str, asyncio.Task] = {}
-        self.settings = get_settings()
 
     async def create_task(
         self,
@@ -294,7 +302,24 @@ class TaskService:
 
             # Create operation context and process through pipeline
             # Pass SINGLE requirement to pipeline
-            output = await self.pipeline.process_tool_generation(task.id, task.tool_requirement)
+            # For V2 pipeline, also pass job_id to organize search results in task directory
+            # if hasattr(self.pipeline, 'process_tool_generation'):
+            #     # Check if pipeline accepts job_id parameter (V2) or not (V1)
+            #     import inspect
+            #     sig = inspect.signature(self.pipeline.process_tool_generation)
+            #     if 'job_id' in sig.parameters:
+            #         # V2 pipeline - pass job_id
+            #         )
+            #     else:
+            #         # V1 pipeline - no job_id parameter
+            #         output = await self.pipeline.process_tool_generation(task.id, task.tool_requirement)
+            # else:
+            #     output = await self.pipeline.process_tool_generation(task.id, task.tool_requirement)
+            output = await self.pipeline.process_tool_generation(
+                task_id=task.task_id,
+                requirement=task.tool_requirement,
+                job_id=task.job_id  # Short job_id like "job_abc123"
+            )
 
             # Log summary
             logger.info(f"Generation complete: {output.success_count} successful, {output.failure_count} failed")

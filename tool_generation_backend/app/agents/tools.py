@@ -108,7 +108,8 @@ async def browse_documentation(library: str, query: str) -> str:
         logger.info(f"Browsing {library} documentation for: {query}")
 
         # Use existing codex browse functionality
-        result = await execute_codex_browse(library, query)
+        # Wrap single query in a list for the updated API
+        result = await execute_codex_browse(library, [query])
 
         logger.info(f"Successfully browsed {library} documentation")
 

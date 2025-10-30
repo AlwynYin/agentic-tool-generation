@@ -99,6 +99,37 @@ class Settings(BaseSettings):
         description="Directory for search results (relative to tool_service_dir)"
     )
 
+    # Pipeline V2 Configuration
+    pipeline_version: str = Field(
+        default="v2",
+        env="PIPELINE_VERSION",
+        description="Pipeline version to use: v1 or v2"
+    )
+
+    max_refinement_iterations: int = Field(
+        default=3,
+        env="MAX_REFINEMENT_ITERATIONS",
+        description="Maximum iterations for tool refinement in V2 pipeline"
+    )
+
+    enable_property_tests: bool = Field(
+        default=False,
+        env="ENABLE_PROPERTY_TESTS",
+        description="Generate property-based tests in V2 pipeline"
+    )
+
+    enable_golden_tests: bool = Field(
+        default=True,
+        env="ENABLE_GOLDEN_TESTS",
+        description="Generate golden output tests in V2 pipeline"
+    )
+
+    pytest_timeout: int = Field(
+        default=60,
+        env="PYTEST_TIMEOUT",
+        description="Timeout for pytest execution in seconds"
+    )
+
     @property
     def tools_service_path(self) -> str:
         """Get the full tools directory path."""

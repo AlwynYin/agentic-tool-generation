@@ -145,20 +145,25 @@ async def execute_codex_implement(plan: ImplementationPlan) -> Dict[str, Any]:
 
 async def execute_codex_browse(
     library: str,
-    query: str
+    queries: List[str],
+    task_id: Optional[str] = None,
+    job_id: Optional[str] = None
 ) -> ApiBrowseResult:
     """
     Execute Codex to browse/search documentation and extract API references.
 
     Args:
         library: Library name (rdkit, ase, pymatgen, pyscf)
-        query: Search query for API documentation
+        queries: List of search queries for API documentation (can be single query in a list)
+        task_id: Optional task ID for V2 pipeline (saves to task-specific dir)
+        job_id: Optional job ID for V2 pipeline (saves to job-specific dir)
 
     Returns:
         ApiBrowseResult with structured API function references
     """
-    # Convert single query to list for internal processing
-    queries = [query]
+    # Ensure queries is a list
+    if not isinstance(queries, list):
+        queries = [queries]
 
     try:
         # Get repos path from settings
@@ -189,15 +194,32 @@ async def execute_codex_browse(
         # Create output filename with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_filename = f"{library_lower}_api_refs_{timestamp}.json"
-        output_path = Path(settings.searches_path) / output_filename
-        logger.debug(f"Constructed file name: {output_path}")
+
+        # Determine output directory based on whether task_id/job_id are provided
+        if task_id and job_id:
+            # V2 pipeline: Save to task-specific searches directory
+            # tools/<job_id>/<task_id>/searches/
+            output_dir = Path(settings.tools_path) / job_id / task_id / "searches"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_path = output_dir / output_filename
+            # Relative path for Codex (from tool_service directory)
+            output_path_relative = f"{settings.tools_dir}/{job_id}/{task_id}/searches/{output_filename}"
+            logger.info(f"Using V2 task-specific search directory: {output_path}")
+        else:
+            # V1 pipeline: Save to global searches directory (backwards compatibility)
+            output_dir = Path(settings.searches_path)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_path = output_dir / output_filename
+            output_path_relative = f"{settings.searchs_dir}/{output_filename}"
+            logger.info(f"Using V1 global search directory: {output_path}")
+
+        logger.debug(f"Output path: {output_path}")
 
         # Build the browsing prompt with structured output requirements
         queries_text = "\n".join([f"  - {q}" for q in queries])
 
         # Use relative paths since Codex will be running in tool_service directory
         library_dir_relative = f"{settings.repos_dir}/{library_lower}"
-        output_path_relative = f"{settings.searchs_dir}/{output_filename}"
 
         browse_prompt = f"""You are tasked with extracting API function references from the {library} library documentation.
 
