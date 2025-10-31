@@ -317,7 +317,7 @@ Generate the test suite now.
         prompt: str
     ) -> dict:
         """
-        Execute Codex CLI to generate test file.
+        Execute LLM backend CLI to generate test file.
 
         Args:
             plan: Implementation plan
@@ -326,21 +326,42 @@ Generate the test suite now.
         Returns:
             dict: Execution result
         """
-        from app.utils.codex_utils import _run_codex_command
+        backend = self.settings.llm_backend.lower()
 
         try:
-            # Build Codex command
-            cmd = [
-                "codex", "exec",
-                "--model", "gpt-5",
-                "--dangerously-bypass-approvals-and-sandbox",
-                "--skip-git-repo-check",
-                "--cd", str(self.settings.tools_service_path),
-                prompt
-            ]
+            if backend == "codex":
+                from app.utils.codex_utils import _run_codex_command
 
-            # Execute command
-            result = await _run_codex_command(cmd, timeout=300)
+                # Build Codex command
+                cmd = [
+                    "codex", "exec",
+                    "--model", "gpt-5",
+                    "--dangerously-bypass-approvals-and-sandbox",
+                    "--skip-git-repo-check",
+                    "--cd", str(self.settings.tools_service_path),
+                    prompt
+                ]
+
+                # Execute command
+                result = await _run_codex_command(cmd, timeout=300)
+
+            elif backend == "claude":
+                from app.utils.claude_utils import _run_claude_command
+
+                # Build Claude Code command
+                cmd = [
+                    "claude",
+                    "--dangerously-skip-permissions",
+                    "-p", prompt
+                ]
+
+                # Execute command
+                result = await _run_claude_command(cmd, cwd=str(self.settings.tools_service_path), timeout=300)
+            else:
+                return {
+                    "success": False,
+                    "error": f"Unknown LLM backend: {backend}"
+                }
 
             # Check if test file was created
             test_dir = Path(self.settings.tools_path) / plan.job_id / plan.task_id / "tests"
@@ -369,7 +390,7 @@ Generate the test suite now.
                 }
 
         except Exception as e:
-            logger.error(f"Error executing Codex for test generation: {e}")
+            logger.error(f"Error executing {backend} for test generation: {e}")
             return {
                 "success": False,
                 "error": str(e)

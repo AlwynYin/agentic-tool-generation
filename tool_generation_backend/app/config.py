@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     )
 
     # AI Services
+    llm_backend: str = Field(
+        default="codex",
+        env="LLM_BACKEND",
+        description="LLM backend to use: 'codex' or 'claude'"
+    )
     openai_api_key: str = Field(
         ...,
         env="OPENAI_API_KEY",
@@ -36,6 +41,11 @@ class Settings(BaseSettings):
         default="gpt-5",
         env="OPENAI_MODEL",
         description="OpenAI model to use"
+    )
+    anthropic_api_key: str = Field(
+        default="",
+        env="ANTHROPIC_API_KEY",
+        description="Anthropic API key for Claude Code (optional, uses claude login if not provided)"
     )
 
     # Server Configuration
@@ -159,8 +169,17 @@ class Settings(BaseSettings):
         """Validate required configuration settings."""
         errors = []
 
-        if not self.openai_api_key:
-            errors.append("OPENAI_API_KEY environment variable is required")
+        # Validate LLM backend selection
+        valid_backends = {"codex", "claude"}
+        if self.llm_backend not in valid_backends:
+            errors.append(
+                f"LLM_BACKEND must be one of {valid_backends}, "
+                f"got: {self.llm_backend}"
+            )
+
+        # Validate backend-specific API keys
+        if self.llm_backend == "codex" and not self.openai_api_key:
+            errors.append("OPENAI_API_KEY environment variable is required when using Codex backend")
 
         if not self.mongodb_url:
             errors.append("MONGODB_URL environment variable is required")

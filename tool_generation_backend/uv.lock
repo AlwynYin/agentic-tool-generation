@@ -17,6 +17,7 @@ dependencies = [
     { name = "ase" },
     { name = "cclib" },
     { name = "fastapi" },
+    { name = "geometric" },
     { name = "httpx" },
     { name = "matplotlib" },
     { name = "mdtraj" },
@@ -28,6 +29,7 @@ dependencies = [
     { name = "openmm" },
     { name = "pandas" },
     { name = "plotly" },
+    { name = "pyberny" },
     { name = "pydantic-settings" },
     { name = "pymatgen" },
     { name = "pyscf" },
@@ -55,6 +57,7 @@ requires-dist = [
     { name = "ase", specifier = ">=3.26.0" },
     { name = "cclib", specifier = ">=1.8.1" },
     { name = "fastapi", specifier = ">=0.116.2" },
+    { name = "geometric", specifier = ">=1.1" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "matplotlib", specifier = ">=3.10.7" },
     { name = "mdtraj", specifier = ">=1.11.0" },
@@ -66,6 +69,7 @@ requires-dist = [
     { name = "openmm", specifier = ">=8.4.0" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "plotly", specifier = ">=6.3.1" },
+    { name = "pyberny", specifier = ">=0.3.3" },
     { name = "pydantic-settings", specifier = ">=2.10.1" },
     { name = "pymatgen", specifier = ">=2025.10.7" },
     { name = "pyscf", specifier = ">=2.11.0" },
@@ -702,6 +706,18 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/bb/ed/41956f52105b8dbc26e457c5705340c67c8cc2b79f394b79bffc09d0e938/frozenlist-1.7.0-cp313-cp313t-win_amd64.whl", hash = "sha256:3bf8010d71d4507775f658e9823210b7427be36625b387221642725b515dcf3e", size = 47516, upload-time = "2025-06-09T23:02:03.779Z" },
     { url = "https://files.pythonhosted.org/packages/ee/45/b82e3c16be2182bff01179db177fe144d58b5dc787a7d4492c6ed8b9317f/frozenlist-1.7.0-py3-none-any.whl", hash = "sha256:9a5af342e34f7e97caf8c995864c7a396418ae2859cc6fdf1b1073020d516a7e", size = 13106, upload-time = "2025-06-09T23:02:34.204Z" },
 ]
+
+[[package]]
+name = "geometric"
+version = "1.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "networkx" },
+    { name = "numpy" },
+    { name = "scipy" },
+    { name = "six" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d2/a7/3fc9cab92d664246405bdb9bce2a984c7ebe6e9917c1b44c3a968e2bc980/geometric-1.1.tar.gz", hash = "sha256:ed7bd2ed67a2f15d442ccc6ce628fdfe682bc3f11ee0566d2edde4830877ed2b", size = 386046, upload-time = "2025-01-24T21:36:27.557Z" }
 
 [[package]]
 name = "griffe"
@@ -2086,6 +2102,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/cd/05/0a34433a064256a578f1783a10da6df098ceaa4a57bbeaa96a6c0352786b/pure_eval-0.2.3.tar.gz", hash = "sha256:5f4e983f40564c576c7c8635ae88db5956bb2229d7e9237d03b3c0b0190eaf42", size = 19752, upload-time = "2024-07-21T12:58:21.801Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8e/37/efad0257dc6e593a18957422533ff0f87ede7c9c6ea010a2177d738fb82f/pure_eval-0.2.3-py3-none-any.whl", hash = "sha256:1db8e35b67b3d218d818ae653e27f06c3aa420901fa7b081ca98cbedc874e0d0", size = 11842, upload-time = "2024-07-21T12:58:20.04Z" },
+]
+
+[[package]]
+name = "pyberny"
+version = "0.3.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b6/a1/6d6b0a625a94e008f97af1ec6cf840561f8204bd3942931c130e0e210d37/pyberny-0.3.3.tar.gz", hash = "sha256:8fcfc21ca02249680d92494b924b5fb3d0c2861146b312d7b0a187ee31e97f95", size = 18278, upload-time = "2018-07-19T17:32:32.744Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/54/1d/e1331eec12f8d12caa8a0ceb062be6a28e0da3d971b80e0ec28e194d7eaa/pyberny-0.3.3-py2.py3-none-any.whl", hash = "sha256:867a63f467c12926a631381b5ab2d776c350192e204b310625b8a1917eb7f1b2", size = 20882, upload-time = "2018-07-19T17:32:23.083Z" },
 ]
 
 [[package]]

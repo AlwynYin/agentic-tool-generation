@@ -1,8 +1,8 @@
 """
 Implementer Agent for generating Python tool code.
 
-This agent uses Codex CLI to generate tool implementations from
-detailed plans and API references.
+This agent uses LLM backend (Codex or Claude Code) to generate tool
+implementations from detailed plans and API references.
 """
 
 import logging
@@ -16,7 +16,7 @@ from app.models.pipeline_v2 import (
     ImplementationResult,
     IterationSummary
 )
-from app.utils.codex_utils import execute_codex_implement
+from app.utils.llm_backend import execute_llm_implement
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ class ImplementerAgent:
     """
     Agent for implementing Python tools from plans.
 
-    Uses Codex CLI to:
+    Uses LLM backend (Codex or Claude Code) to:
     1. Generate Python tool file from plan
     2. Add strict type annotations
     3. Add comprehensive docstring
@@ -45,7 +45,7 @@ class ImplementerAgent:
         iteration_history: List[IterationSummary]
     ) -> ImplementationResult:
         """
-        Implement tool from plan using Codex.
+        Implement tool from plan using LLM backend.
 
         Args:
             plan: Implementation plan from Planner Agent
@@ -61,10 +61,10 @@ class ImplementerAgent:
             # Build enhanced implementation prompt
             prompt = self._build_enhanced_prompt(plan, exploration_report, iteration_history)
 
-            # Execute Codex to generate tool file
-            # Note: execute_codex_implement expects a simplified plan format
-            # We'll use the existing execute_codex_implement but with enhanced prompt
-            result = await self._execute_codex_with_prompt(plan, prompt)
+            # Execute LLM backend to generate tool file
+            # Note: execute_llm_implement expects a simplified plan format
+            # We'll use the existing execute_llm_implement but with enhanced prompt
+            result = await self._execute_llm_with_prompt(plan, prompt)
 
             if result["success"]:
                 # Read generated code
@@ -113,7 +113,7 @@ class ImplementerAgent:
             iteration_history: Previous iteration summaries
 
         Returns:
-            Enhanced prompt for Codex
+            Enhanced prompt for LLM backend
         """
         # Format plan steps
         steps_text = "Implementation Steps:\n"
@@ -254,13 +254,13 @@ Generate the tool now, following ALL requirements and the implementation plan.
 
         return prompt
 
-    async def _execute_codex_with_prompt(
+    async def _execute_llm_with_prompt(
         self,
         plan: ImplementationPlan,
         prompt: str
     ) -> dict:
         """
-        Execute Codex CLI with custom prompt.
+        Execute LLM backend CLI with custom prompt.
 
         Args:
             plan: Implementation plan (for task_id, job_id, requirement info)
@@ -269,22 +269,45 @@ Generate the tool now, following ALL requirements and the implementation plan.
         Returns:
             dict: Execution result
         """
-        # Import here to avoid circular dependency
-        from app.utils.codex_utils import _run_codex_command
+        backend = self.settings.llm_backend.lower()
 
         try:
-            # Build Codex command
-            cmd = [
-                "codex", "exec",
-                "--model", "gpt-5",
-                "--dangerously-bypass-approvals-and-sandbox",
-                "--skip-git-repo-check",
-                "--cd", str(self.settings.tools_service_path),
-                prompt
-            ]
+            if backend == "codex":
+                # Import here to avoid circular dependency
+                from app.utils.codex_utils import _run_codex_command
 
-            # Execute command
-            result = await _run_codex_command(cmd, timeout=300)
+                # Build Codex command
+                cmd = [
+                    "codex", "exec",
+                    "--model", "gpt-5",
+                    "--dangerously-bypass-approvals-and-sandbox",
+                    "--skip-git-repo-check",
+                    "--cd", str(self.settings.tools_service_path),
+                    prompt
+                ]
+
+                # Execute command
+                result = await _run_codex_command(cmd, timeout=300)
+
+            elif backend == "claude":
+                # Import here to avoid circular dependency
+                from app.utils.claude_utils import _run_claude_command
+
+                # Build Claude Code command
+                cmd = [
+                    "claude",
+                    "--dangerously-skip-permissions",
+                    "-p", prompt
+                ]
+
+                # Execute command
+                result = await _run_claude_command(cmd, cwd=str(self.settings.tools_service_path), timeout=300)
+            else:
+                return {
+                    "success": False,
+                    "tool_name": plan.requirement_name,
+                    "error": f"Unknown LLM backend: {backend}"
+                }
 
             # Check if file was created
             tools_dir = Path(self.settings.tools_path) / plan.job_id / plan.task_id
@@ -307,7 +330,7 @@ Generate the tool now, following ALL requirements and the implementation plan.
                 }
 
         except Exception as e:
-            logger.error(f"Error executing Codex: {e}")
+            logger.error(f"Error executing {backend}: {e}")
             return {
                 "success": False,
                 "tool_name": plan.requirement_name,

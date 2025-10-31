@@ -1,8 +1,8 @@
 """
 Search Agent for exploring library documentation and repositories.
 
-This agent uses Codex CLI to search for APIs, code examples, and
-documentation relevant to the tool requirements.
+This agent uses LLM backend (Codex or Claude Code) to search for APIs,
+code examples, and documentation relevant to the tool requirements.
 """
 
 import logging
@@ -19,7 +19,7 @@ from app.models.pipeline_v2 import (
     ParameterSpec,
     OutputSpec
 )
-from app.utils.codex_utils import execute_codex_browse
+from app.utils.llm_backend import execute_llm_browse
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ class SearchAgent:
     """
     Agent for exploring library documentation and repositories.
 
-    Uses Codex CLI to:
+    Uses LLM backend (Codex or Claude Code) to:
     1. Identify relevant library
     2. Search documentation
     3. Extract API function references
@@ -80,8 +80,8 @@ class SearchAgent:
             api_refs_file = ""
 
             logger.info(f"Searching documentation with {len(queries)} queries in batch")
-            # Pass all queries at once to execute_codex_browse
-            browse_result = await execute_codex_browse(library, queries, task_id=task_id, job_id=job_id)
+            # Pass all queries at once to execute_llm_browse
+            browse_result = await execute_llm_browse(library, queries, task_id=task_id, job_id=job_id)
 
             if browse_result.success:
                 # Parse the browse result and extract APIs
@@ -205,10 +205,10 @@ class SearchAgent:
 
     def _parse_browse_result(self, browse_result) -> dict:
         """
-        Parse browse result from execute_codex_browse.
+        Parse browse result from execute_llm_browse.
 
         Args:
-            browse_result: ApiBrowseResult from execute_codex_browse
+            browse_result: ApiBrowseResult from execute_llm_browse
 
         Returns:
             dict: Parsed APIs, examples, paths, entry_points

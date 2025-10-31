@@ -19,7 +19,7 @@ from app.api.jobs import router as jobs_router
 from app.api.repositories import router as repositories_router
 from app.websocket.manager import WebSocketManager
 from app.middleware.logging import setup_logging_middleware
-from app.utils.codex_utils import authenticate_codex
+from app.utils.llm_backend import authenticate_llm
 from app.services.repository_service import RepositoryService
 
 
@@ -37,13 +37,13 @@ async def lifespan(app: FastAPI):
     await init_database(settings.mongodb_url, settings.mongodb_db_name)
     logging.info("✅ Database connection established")
 
-    # Authenticate Codex CLI
-    if settings.openai_api_key:
-        codex_auth_success = authenticate_codex(settings.openai_api_key)
-        if not codex_auth_success:
-            logging.warning("⚠️ Codex authentication failed - tool generation may not work")
+    # Authenticate LLM backend
+    logging.info(f"🤖 LLM Backend: {settings.llm_backend.upper()}")
+    llm_auth_success = authenticate_llm()
+    if not llm_auth_success:
+        logging.warning(f"⚠️ {settings.llm_backend.upper()} authentication failed - tool generation may not work")
     else:
-        logging.warning("⚠️ No OpenAI API key provided - Codex authentication skipped")
+        logging.info(f"✅ {settings.llm_backend.upper()} authenticated successfully")
 
     # Initialize WebSocket manager
     app.state.websocket_manager = WebSocketManager()
