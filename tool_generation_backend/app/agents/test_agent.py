@@ -7,9 +7,10 @@ independently of the implementation to reduce coupling.
 
 import logging
 from pathlib import Path
-from typing import List
+from typing import Dict, List
 
 from app.config import get_settings
+from app.constants import STANDARD_TOOL_DEFINITION
 from app.models.pipeline_v2 import (
     ToolDefinition,
     ImplementationPlan,
@@ -55,10 +56,13 @@ class TestAgent:
             TestResult: Generated test file and fixtures
         """
         try:
-            logger.info(f"Generating tests for: {plan.requirement_name}")
+            logger.info(f"Generating/updating tests for: {plan.requirement_name}")
 
-            # Build test generation prompt
-            prompt = self._build_test_prompt(tool_definition, plan, iteration_history)
+            # Write test context files
+            context_files = self._write_test_context_files(tool_definition, plan, iteration_history)
+
+            # Build brief test generation prompt
+            prompt = self._build_test_prompt(tool_definition, plan, iteration_history, context_files)
 
             # Execute Codex to generate test file
             result = await self._execute_codex_test_generation(plan, prompt)
@@ -101,14 +105,14 @@ class TestAgent:
                 error=f"Test agent error: {str(e)}"
             )
 
-    def _build_test_prompt(
+    def _write_test_context_files(
         self,
         tool_definition: ToolDefinition,
         plan: ImplementationPlan,
         iteration_history: List[IterationSummary]
-    ) -> str:
+    ) -> Dict[str, str]:
         """
-        Build test generation prompt.
+        Write test context files to disk for the LLM to reference.
 
         Args:
             tool_definition: Tool specification
@@ -116,197 +120,167 @@ class TestAgent:
             iteration_history: Previous iteration summaries
 
         Returns:
-            Prompt for Codex
+            Dict[str, str]: Mapping of file purpose to file path
         """
-        # Format contracts as test requirements
-        contracts_text = "Contracts to Test:\n"
-        for contract in tool_definition.contracts:
-            contracts_text += f"- {contract}\n"
+        # Create directories
+        tools_dir = Path(self.settings.tools_path) / plan.job_id / plan.task_id
+        plan_dir = tools_dir / "plan"
+        context_dir = tools_dir / "context"
 
-        # Format iteration history (feedback from previous test runs)
-        history_text = ""
-        if iteration_history:
-            history_text = "\n\n=== PREVIOUS ITERATION FEEDBACK ===\n"
-            for summary in iteration_history:
-                history_text += f"\nIteration {summary.iteration}:\n"
-                history_text += f"What Failed: {summary.what_failed}\n"
-                history_text += f"Changes Made: {summary.what_changed}\n"
-                history_text += f"Next Focus: {summary.next_focus}\n"
-            history_text += "\nIMPORTANT: Write tests that will catch the issues from previous iterations!\n"
-            history_text += "=== END FEEDBACK ===\n\n"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        context_dir.mkdir(parents=True, exist_ok=True)
 
-        prompt = f"""Generate a comprehensive test suite for the following tool.
+        file_paths = {}
 
-{history_text}
+        try:
+            # 1. Write test requirements
+            test_req_file = plan_dir / "test_requirements.txt"
+            with open(test_req_file, 'w') as f:
+                f.write(f"# Test Requirements for {plan.requirement_name}\n\n")
+                f.write("## Test Types Required\n\n")
+                f.write("1. Unit tests - Test individual functions and edge cases\n")
+                f.write("2. Property tests - Test mathematical/chemical properties\n")
+                f.write("3. Golden tests - Test against known reference values\n")
+                f.write("4. Integration tests - Test end-to-end workflows\n\n")
+                f.write("## Coverage Requirements\n\n")
+                f.write("- Test all input validation rules\n")
+                f.write("- Test all error conditions (verify success=False and error message)\n")
+                f.write("- Test stateless behavior\n")
+                f.write("- Test dict return format\n")
 
-=== TOOL SPECIFICATION ===
+            file_paths["test_requirements"] = str(test_req_file)
+            logger.info(f"Wrote test requirements to: {test_req_file}")
 
-Function Name: {tool_definition.name}
-Signature: {tool_definition.signature}
+            # 2. Write contracts
+            contracts_file = plan_dir / "contracts.txt"
+            with open(contracts_file, 'w') as f:
+                f.write(f"# Contracts for {plan.requirement_name}\n\n")
+                f.write("## From Tool Definition\n\n")
+                for i, contract in enumerate(tool_definition.contracts, 1):
+                    f.write(f"{i}. {contract}\n")
+                f.write("\n## From Implementation Plan\n\n")
+                for i, rule in enumerate(plan.validation_rules, 1):
+                    f.write(f"{i}. {rule}\n")
 
-Docstring:
+            file_paths["contracts"] = str(contracts_file)
+            logger.info(f"Wrote contracts to: {contracts_file}")
+
+            # 3. Write iteration history (if exists)
+            if iteration_history:
+                history_file = context_dir / "test_iteration_history.txt"
+                with open(history_file, 'w') as f:
+                    f.write(f"# Test Iteration History for {plan.requirement_name}\n\n")
+                    f.write("Tests have been generated before. Review previous iterations to fix failing tests.\n\n")
+
+                    for summary in iteration_history:
+                        f.write(f"## Iteration {summary.iteration}\n\n")
+                        f.write(f"**What Failed:** {summary.what_failed}\n\n")
+                        f.write(f"**Next Focus:** {summary.next_focus}\n\n")
+                        f.write("---\n\n")
+
+                file_paths["history"] = str(history_file)
+                logger.info(f"Wrote test iteration history to: {history_file}")
+
+            return file_paths
+
+        except Exception as e:
+            logger.error(f"Failed to write test context files: {e}")
+            return {}
+
+    def _build_test_prompt(
+        self,
+        tool_definition: ToolDefinition,
+        plan: ImplementationPlan,
+        iteration_history: List[IterationSummary],
+        context_files: Dict[str, str]
+    ) -> str:
+        """
+        Build brief test generation prompt with file references.
+
+        Args:
+            tool_definition: Tool specification
+            plan: Implementation plan
+            iteration_history: Previous iteration summaries
+            context_files: Dict mapping file purpose to file path
+
+        Returns:
+            Brief prompt for LLM backend with file references
+        """
+        # Build relative paths
+        tools_dir_rel = f"tools/{plan.job_id}/{plan.task_id}"
+        tool_file = f"{tools_dir_rel}/{plan.requirement_name}.py"
+        test_file = f"{tools_dir_rel}/tests/test_{plan.requirement_name}.py"
+
+        # Build context file references
+        context_refs = []
+        if "test_requirements" in context_files:
+            context_refs.append(f"- Test requirements: {context_files['test_requirements']}")
+        if "contracts" in context_files:
+            context_refs.append(f"- Contracts to validate: {context_files['contracts']}")
+        if "history" in context_files:
+            context_refs.append(f"- Previous test iteration feedback: {context_files['history']}")
+
+        context_refs_text = "\n".join(context_refs)
+
+        # Build brief prompt
+        prompt = f"""You are generating or updating comprehensive tests for a Python chemistry computation tool.
+
+{STANDARD_TOOL_DEFINITION}
+
+## Task
+
+**Tool Name:** {plan.requirement_name}
+**Tool File:** {tool_file}
+**Test File:** {test_file}
+**Fixtures Directory:** {tools_dir_rel}/tests/data/
+
+## Tool Specification
+
+**Function Signature:** {tool_definition.signature}
+
+**Docstring:**
+```
 {tool_definition.docstring}
+```
 
-{contracts_text}
-
-Example Usage:
+**Example Usage:**
+```python
 {tool_definition.example_call}
-
-Implementation Plan Summary:
-- API References: {', '.join(plan.api_refs[:5])}
-- Steps: {len(plan.steps)} implementation steps
-- Validation Rules: {len(plan.validation_rules)} rules
-
-=== TEST FILE LOCATION ===
-
-File: tools/{plan.job_id}/{plan.task_id}/tests/test_{plan.requirement_name}.py
-Fixtures Directory: tools/{plan.job_id}/{plan.task_id}/tests/data/
-
-=== TEST REQUIREMENTS ===
-
-Generate a comprehensive test suite with the following test types:
-
-1. **Unit Tests** (REQUIRED)
-   - Test input validation (type checks, format checks)
-   - Test error handling (invalid inputs should raise appropriate exceptions)
-   - Test edge cases (empty strings, None, boundary values)
-   - Test output type and format
-   - Keep tests fast (< 1 second each)
-
-2. **Property Tests** (OPTIONAL, only if applicable)
-   - Test invariants (e.g., symmetry, commutativity)
-   - Test bounds (e.g., output always positive)
-   - Use simple property checks, not hypothesis library
-
-3. **Golden Tests** (RECOMMENDED)
-   - Test against known good outputs
-   - Use small, realistic examples
-   - Create fixtures in tests/data/ directory
-   - Compare actual vs expected with appropriate tolerance
-
-4. **Integration Tests** (REQUIRED)
-   - End-to-end test with realistic inputs
-   - Test complete workflow from input to output
-   - Use small molecules/structures for fast execution
-   - Test with different parameter combinations
-
-=== TEST EXAMPLES ===
-
-**Unit Test Example:**
-```python
-def test_{plan.requirement_name}_valid_input():
-    \"\"\"Test with valid input.\"\"\"
-    result = {plan.requirement_name}("valid_input")
-    assert isinstance(result, expected_type)
-    assert result > 0  # or appropriate check
-
-def test_{plan.requirement_name}_invalid_input():
-    \"\"\"Test that invalid input raises ValueError.\"\"\"
-    with pytest.raises(ValueError):
-        {plan.requirement_name}(None)
-
-    with pytest.raises(ValueError):
-        {plan.requirement_name}("")
 ```
 
-**Golden Test Example:**
-```python
-def test_{plan.requirement_name}_golden():
-    \"\"\"Test against golden outputs.\"\"\"
-    # Load golden data
-    golden_data = {{
-        "input1": expected_output1,
-        "input2": expected_output2,
-    }}
+## Context Files
 
-    for input_val, expected in golden_data.items():
-        result = {plan.requirement_name}(input_val)
-        assert abs(result - expected) < 0.001  # appropriate tolerance
-```
+Read the following files for test requirements and contracts:
 
-**Integration Test Example:**
-```python
-def test_{plan.requirement_name}_integration():
-    \"\"\"End-to-end integration test.\"\"\"
-    # Use realistic example from chemistry domain
-    result = {plan.requirement_name}("realistic_input")
-    # Verify result is in expected range or format
-    assert expected_min < result < expected_max
-```
+{context_refs_text}
 
-=== IMPLEMENTATION GUIDELINES ===
+## Instructions
 
-1. **Imports:**
-   ```python
-   import pytest
-   import json
-   from pathlib import Path
-   # Import the tool function
-   import sys
-   sys.path.insert(0, str(Path(__file__).parent.parent))
-   from {plan.requirement_name} import {plan.requirement_name}
-   ```
+1. **Read all context files** to understand what needs to be tested
+2. **Test the tool specification**, not the implementation (don't read the tool file)
+3. **Test the dict return format**:
+   - Verify "success", "error", "result" keys exist
+   - Test success=True cases with valid inputs
+   - Test success=False cases with invalid inputs
+   - Verify error messages are descriptive
+4. **Test stateless behavior**: Call function multiple times, verify no side effects
+5. **Follow test types**: Unit, property, golden, integration tests
+6. **Update existing tests** if iteration history exists (fix failing tests based on feedback)
 
-2. **Fixtures (if needed):**
-   - Create fixtures in tests/data/ directory
-   - Use JSON for simple data
-   - Use appropriate formats (XYZ, PDB, CIF) for structures
-   - Keep fixtures small (< 100 atoms for molecules)
+## Test Requirements
 
-3. **Assertions:**
-   - Use appropriate assertions (assert, pytest.raises, pytest.approx)
-   - Include descriptive failure messages
-   - Check both type and value
+- Use pytest framework
+- Import: `import pytest`, `from {plan.requirement_name} import {plan.requirement_name}`
+- 5-15 test functions covering all validation rules
+- Fast tests (< 1 second each, < 60 seconds total)
+- CPU-only (no GPU required)
+- Create fixtures in tests/data/ if needed
 
-4. **Test Organization:**
-   - Group related tests in classes (optional)
-   - Use descriptive test names (test_<function>_<scenario>)
-   - Add docstrings to explain what's being tested
+## Output
 
-5. **Performance:**
-   - All tests should complete in < 60 seconds total
-   - Individual tests should be < 1 second
-   - Use small datasets
-   - Avoid expensive computations (use force fields, not DFT)
+Generate/update the test file at: {test_file}
 
-6. **CPU-Only:**
-   - Assume CPU-only execution
-   - No GPU required
-   - No CUDA dependencies
-
-=== IMPORTANT NOTES ===
-
-**Test Independently:**
-- Write tests based on the SPECIFICATION (tool_definition), not the implementation
-- This reduces coupling and catches implementation bugs
-- Tests should pass for ANY correct implementation
-
-**Don't Look at Implementation:**
-- You should NOT read the implementation code
-- Base tests on: signature, docstring, contracts, example usage
-- This ensures tests validate the specification, not the current code
-
-**Chemistry-Specific:**
-- Use realistic chemistry examples (ethanol, benzene, water, aspirin)
-- Use correct SMILES strings
-- Test with valid molecular structures
-- Check units (g/mol, eV, Angstroms)
-
-=== OUTPUT FORMAT ===
-
-Generate files at:
-1. tools/{plan.job_id}/{plan.task_id}/tests/test_{plan.requirement_name}.py
-2. tools/{plan.job_id}/{plan.task_id}/tests/data/<fixture_files> (if needed)
-
-The test file should:
-- Import pytest and necessary libraries
-- Import the tool function
-- Contain 5-15 test functions
-- Cover all validation rules from contracts
-- Include at least one integration test
-- Run successfully with pytest
-
-Generate the test suite now.
+If the file already exists, UPDATE it based on feedback in the iteration history. Otherwise, create it from scratch.
 """
 
         return prompt
@@ -329,34 +303,21 @@ Generate the test suite now.
         backend = self.settings.llm_backend.lower()
 
         try:
+            # Execute backend-specific query
             if backend == "codex":
-                from app.utils.codex_utils import _run_codex_command
-
-                # Build Codex command
-                cmd = [
-                    "codex", "exec",
-                    "--model", "gpt-5",
-                    "--dangerously-bypass-approvals-and-sandbox",
-                    "--skip-git-repo-check",
-                    "--cd", str(self.settings.tools_service_path),
-                    prompt
-                ]
-
-                # Execute command
-                result = await _run_codex_command(cmd, timeout=300)
-
+                from app.utils.codex_utils import run_codex_query
+                result = await run_codex_query(
+                    query=prompt,
+                    working_dir=str(self.settings.tools_service_path),
+                    timeout=300
+                )
             elif backend == "claude":
-                from app.utils.claude_utils import _run_claude_command
-
-                # Build Claude Code command
-                cmd = [
-                    "claude",
-                    "--dangerously-skip-permissions",
-                    "-p", prompt
-                ]
-
-                # Execute command
-                result = await _run_claude_command(cmd, cwd=str(self.settings.tools_service_path), timeout=300)
+                from app.utils.claude_utils import run_claude_query
+                result = await run_claude_query(
+                    query=prompt,
+                    working_dir=str(self.settings.tools_service_path),
+                    timeout=300
+                )
             else:
                 return {
                     "success": False,

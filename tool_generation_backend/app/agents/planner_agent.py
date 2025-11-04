@@ -12,6 +12,7 @@ import agents
 from agents import Agent, Runner
 
 from app.config import get_settings
+from app.constants import STANDARD_TOOL_DEFINITION
 from app.models.pipeline_v2 import (
     ToolDefinition,
     ExplorationReport,
@@ -121,9 +122,7 @@ class PlannerAgent:
                 job_id=job_id,
                 requirement_name=tool_definition.name,
                 requirement_description=f"Error creating plan: {str(e)}",
-                api_refs=[],
                 steps=[],
-                pseudo_code=f"# Error: {str(e)}",
                 validation_rules=[],
                 expected_artifacts=[]
             )
@@ -144,7 +143,6 @@ class PlannerAgent:
             Formatted message for the agent
         """
         # Format API functions
-        apis_text = ""
         if exploration_report.apis:
             apis_text = "Available APIs:\n"
             for api in exploration_report.apis[:5]:  # Limit to top 5 most relevant
@@ -165,6 +163,20 @@ class PlannerAgent:
             for i, example in enumerate(exploration_report.examples[:3], 1):  # Top 3 examples
                 examples_text += f"Example {i}:\n{example.code}\n\n"
 
+        # Format question answers from documentation research
+        qa_text = ""
+        if exploration_report.question_answers:
+            qa_text = "**Question & Answers from Documentation:**\n\n"
+            for qa in exploration_report.question_answers:
+                qa_text += f"Q: {qa.question}\n"
+                qa_text += f"Type: {qa.type}\n"
+                qa_text += f"A: {qa.answer}\n"
+                if qa.library:
+                    qa_text += f"Library: {qa.library}\n"
+                if qa.code_example:
+                    qa_text += f"Example:\n{qa.code_example}\n"
+                qa_text += "\n"
+
         # Format contracts
         contracts_text = "\n".join([f"- {c}" for c in tool_definition.contracts])
 
@@ -180,14 +192,13 @@ class PlannerAgent:
 **Contracts:**
 {contracts_text}
 
-**Example Usage:**
-{tool_definition.example_call}
-
 ---
 
 {apis_text}
 
 {examples_text}
+
+{qa_text}
 
 **Entry Points Found:**
 {', '.join(exploration_report.entry_points[:5]) if exploration_report.entry_points else 'None'}
@@ -199,12 +210,14 @@ Create a comprehensive implementation plan following the structure in your instr
 
     def _get_agent_instructions(self) -> str:
         """Get system instructions for the planner agent."""
-        return """
+        return f"""
 You are an Implementation Planning Agent specialized in creating detailed, executable plans for chemistry computation tools.
+
+{STANDARD_TOOL_DEFINITION}
 
 ## Your Mission:
 
-Analyze the tool definition and available APIs to create a precise, step-by-step implementation plan that guides the code generation.
+Analyze the tool definition and available APIs to create a precise, step-by-step implementation plan that guides the code generation. All implementation plans must ensure the tool follows the Tool Definition Standard above.
 
 ## Output Structure:
 
@@ -216,31 +229,13 @@ ImplementationPlan(
     job_id="",  # Will be filled by system
     requirement_name="",  # Will be filled by system
     requirement_description="",  # Will be filled by system
-    api_refs=["api.function.name1", "api.function.name2", ...],
     steps=[PlanStep(...), PlanStep(...), ...],
-    pseudo_code="# Detailed pseudo-code outline",
     validation_rules=["Rule 1", "Rule 2", ...],
     expected_artifacts=["file1.py", "data structure description", ...]
 )
 ```
 
-## Step 1: Identify API References
-
-List the specific API functions that will be used:
-- Use fully qualified names (e.g., "rdkit.Chem.Descriptors.MolWt")
-- Include 3-8 primary functions
-- Order by importance (most critical first)
-
-**Example:**
-```python
-api_refs=[
-    "rdkit.Chem.MolFromSmiles",
-    "rdkit.Chem.Descriptors.MolWt",
-    "rdkit.Chem.MolToSmiles"
-]
-```
-
-## Step 2: Create Step-by-Step Plan
+## Step 1: Create Step-by-Step Plan
 
 Break down implementation into discrete steps. Each step is a `PlanStep`:
 
@@ -278,85 +273,40 @@ steps=[
         action="parse_input",
         description="Validate SMILES string is non-empty and contains only valid characters",
         apis_used=[],
-        error_handling="Raise ValueError if SMILES is empty or None"
+        error_handling="Return {{success: False, error: 'SMILES cannot be empty', result: None}} if SMILES is empty or None"
     ),
     PlanStep(
         step_number=2,
         action="call_api",
         description="Convert SMILES to RDKit Mol object",
         apis_used=["rdkit.Chem.MolFromSmiles"],
-        error_handling="Raise ValueError if SMILES parsing fails (returns None)"
+        error_handling="Return {{success: False, error: 'Invalid SMILES string', result: None}} if parsing fails (returns None)"
     ),
     PlanStep(
         step_number=3,
         action="call_api",
         description="Calculate molecular weight using RDKit descriptor",
         apis_used=["rdkit.Chem.Descriptors.MolWt"],
-        error_handling="Raise RuntimeError if descriptor calculation fails"
+        error_handling="Return {{success: False, error: 'Calculation failed', result: None}} if descriptor calculation fails"
     ),
     PlanStep(
         step_number=4,
         action="validate",
         description="Ensure molecular weight is positive float",
         apis_used=[],
-        error_handling="Raise RuntimeError if weight is non-positive"
+        error_handling="Return {{success: False, error: 'Invalid weight', result: None}} if weight is non-positive"
     ),
     PlanStep(
         step_number=5,
         action="format_output",
-        description="Return molecular weight as float in g/mol",
+        description="Return success result with molecular weight in g/mol",
         apis_used=[],
-        error_handling="No additional error handling needed"
+        error_handling="Return {{success: True, error: None, result: weight}} with weight as float"
     )
 ]
 ```
 
-## Step 3: Write Pseudo-Code
-
-Create a detailed pseudo-code outline showing the implementation structure:
-
-**Include:**
-- Function signature with type hints
-- Step-by-step logic matching your plan steps
-- Error handling (try-except blocks)
-- Comments explaining key decisions
-- Data flow between steps
-- Units in comments
-
-**Example:**
-```python
-pseudo_code = '''
-def calculate_molecular_weight(smiles: str) -> float:
-    \"\"\"Calculate molecular weight from SMILES.\"\"\"
-
-    # Step 1: Parse input - validate SMILES
-    if not smiles or not isinstance(smiles, str):
-        raise ValueError("SMILES must be a non-empty string")
-
-    # Step 2: Call API - convert SMILES to Mol
-    try:
-        mol = rdkit.Chem.MolFromSmiles(smiles)
-        if mol is None:
-            raise ValueError(f"Invalid SMILES: {smiles}")
-    except Exception as e:
-        raise ValueError(f"Failed to parse SMILES: {e}")
-
-    # Step 3: Call API - calculate molecular weight
-    try:
-        mol_weight = rdkit.Chem.Descriptors.MolWt(mol)  # Returns g/mol
-    except Exception as e:
-        raise RuntimeError(f"Failed to calculate molecular weight: {e}")
-
-    # Step 4: Validate - ensure positive weight
-    if mol_weight <= 0:
-        raise RuntimeError(f"Invalid molecular weight: {mol_weight}")
-
-    # Step 5: Format output - return float
-    return float(mol_weight)  # g/mol
-'''
-```
-
-## Step 4: Define Validation Rules
+## Step 2: Define Validation Rules
 
 List specific validation checks to implement:
 
@@ -377,20 +327,23 @@ List specific validation checks to implement:
 validation_rules=[
     "Input: smiles must be non-empty string",
     "Input: smiles must parse successfully with rdkit.Chem.MolFromSmiles",
-    "Output: molecular weight must be positive float",
+    "Output: must return Dict[str, Any] with 'success', 'error', 'result' keys",
+    "Output: result field must contain positive float molecular weight in g/mol",
     "Output: molecular weight must be in range (0, 10000) g/mol for typical organic molecules",
     "Behavior: function must be deterministic (same input → same output)",
-    "Error: raise ValueError for invalid SMILES",
-    "Error: raise RuntimeError for calculation failures"
+    "Behavior: function must be stateless (no global state, no side effects)",
+    "Error: return success=False with error message for invalid SMILES",
+    "Error: return success=False with error message for calculation failures",
+    "Error: never raise exceptions - all errors via return dict"
 ]
 ```
 
-## Step 5: Specify Expected Artifacts
+## Step 3: Specify Expected Artifacts
 
 List what will be created:
 
 **Typical Artifacts:**
-- Main tool file: `{function_name}.py`
+- Main tool file: `{{function_name}}.py`
 - Data structures returned (dict keys, list structure)
 - Any intermediate files if applicable
 
@@ -398,7 +351,7 @@ List what will be created:
 ```python
 expected_artifacts=[
     "calculate_molecular_weight.py - main tool file",
-    "Returns: float (molecular weight in g/mol)",
+    "Returns: Dict[str, Any] with success (bool), error (str|None), result (float molecular weight in g/mol)",
     "No intermediate files created"
 ]
 ```
@@ -413,44 +366,20 @@ expected_artifacts=[
 **Be Specific:**
 - Name exact API functions
 - Specify units (eV, Angstroms, g/mol, etc.)
-- Define exact error types to raise
+- Define exact error messages to return in error field
+- Specify structure of result field
 
 **Think About Edge Cases:**
 - What if input is None?
 - What if API returns None?
 - What if computation fails?
 - What if result is unexpected?
+- All error cases must return dict, never raise exceptions
 
 **Consider Performance:**
 - Note if computations are expensive
 - Suggest reasonable timeouts
 - Flag operations that might be slow
-
-## Common Patterns:
-
-**Pattern 1: SMILES → Property**
-1. Parse input (validate SMILES)
-2. Convert SMILES to Mol (rdkit.Chem.MolFromSmiles)
-3. Calculate property (rdkit.Chem.Descriptors.XXX)
-4. Validate result
-5. Return value
-
-**Pattern 2: Structure → Optimized Structure**
-1. Parse input (validate XYZ/PDB)
-2. Create structure object (ase.Atoms or similar)
-3. Set up calculator (ase.calculators.XXX)
-4. Run optimization (optimize.BFGS or similar)
-5. Extract optimized structure
-6. Format output (to XYZ string)
-7. Return result
-
-**Pattern 3: Structure → Quantum Properties**
-1. Parse input (validate structure format)
-2. Create quantum chemistry object (pyscf.gto.M)
-3. Run SCF calculation
-4. Extract properties (HOMO, LUMO, etc.)
-5. Convert units if needed
-6. Return dict with properties
 
 ## Quality Standards:
 

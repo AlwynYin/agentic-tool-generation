@@ -7,10 +7,12 @@ implementations from detailed plans and API references.
 
 import logging
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from app.config import get_settings
+from app.constants import STANDARD_TOOL_DEFINITION
 from app.models.pipeline_v2 import (
+    ToolDefinition,
     ImplementationPlan,
     ExplorationReport,
     ImplementationResult,
@@ -40,6 +42,7 @@ class ImplementerAgent:
 
     async def implement(
         self,
+        tool_definition: ToolDefinition,
         plan: ImplementationPlan,
         exploration_report: ExplorationReport,
         iteration_history: List[IterationSummary]
@@ -48,6 +51,7 @@ class ImplementerAgent:
         Implement tool from plan using LLM backend.
 
         Args:
+            tool_definition: Tool specification from Intake Agent
             plan: Implementation plan from Planner Agent
             exploration_report: API findings from Search Agent
             iteration_history: Summaries from previous iterations (empty for first iteration)
@@ -56,10 +60,13 @@ class ImplementerAgent:
             ImplementationResult: Generated tool file path and code
         """
         try:
-            logger.info(f"Implementing tool: {plan.requirement_name}")
+            logger.info(f"Implementing/updating tool: {plan.requirement_name}")
 
-            # Build enhanced implementation prompt
-            prompt = self._build_enhanced_prompt(plan, exploration_report, iteration_history)
+            # Write context files to disk
+            context_files = self._write_context_files(tool_definition, plan, exploration_report, iteration_history)
+
+            # Build brief implementation prompt
+            prompt = self._build_enhanced_prompt(plan, exploration_report, iteration_history, context_files)
 
             # Execute LLM backend to generate tool file
             # Note: execute_llm_implement expects a simplified plan format
@@ -98,158 +105,216 @@ class ImplementerAgent:
                 error=f"Implementer agent error: {str(e)}"
             )
 
-    def _build_enhanced_prompt(
+    def _write_context_files(
         self,
+        tool_definition: ToolDefinition,
         plan: ImplementationPlan,
         exploration_report: ExplorationReport,
         iteration_history: List[IterationSummary]
-    ) -> str:
+    ) -> Dict[str, str]:
         """
-        Build enhanced implementation prompt with plan details.
+        Write context files to disk for the LLM to reference.
 
         Args:
+            tool_definition: Tool specification
             plan: Implementation plan
             exploration_report: API findings
             iteration_history: Previous iteration summaries
 
         Returns:
-            Enhanced prompt for LLM backend
+            Dict[str, str]: Mapping of file purpose to file path
         """
-        # Format plan steps
-        steps_text = "Implementation Steps:\n"
-        for step in plan.steps:
-            steps_text += f"{step.step_number}. [{step.action}] {step.description}\n"
-            if step.apis_used:
-                steps_text += f"   APIs: {', '.join(step.apis_used)}\n"
-            steps_text += f"   Error Handling: {step.error_handling}\n"
+        from pathlib import Path
 
-        # Format validation rules
-        validation_text = "Validation Rules:\n"
-        for rule in plan.validation_rules:
-            validation_text += f"- {rule}\n"
+        # Create directories
+        tools_dir = Path(self.settings.tools_path) / plan.job_id / plan.task_id
+        plan_dir = tools_dir / "plan"
+        context_dir = tools_dir / "context"
 
-        # Format API references with examples
-        api_refs_text = "API References:\n"
-        for api in exploration_report.apis[:5]:  # Top 5 APIs
-            api_refs_text += f"\n{api.function_name}:\n"
-            api_refs_text += f"  Description: {api.description}\n"
-            if api.examples:
-                api_refs_text += f"  Example: {api.examples[0].code[:200]}...\n"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        context_dir.mkdir(parents=True, exist_ok=True)
 
-        # Format iteration history (feedback from previous attempts)
-        history_text = ""
-        if iteration_history:
-            history_text = "\n\n=== PREVIOUS ITERATION FEEDBACK ===\n"
-            for summary in iteration_history:
-                history_text += f"\nIteration {summary.iteration}:\n"
-                history_text += f"What Failed: {summary.what_failed}\n"
-                history_text += f"Changes Made: {summary.what_changed}\n"
-                history_text += f"Next Focus: {summary.next_focus}\n"
-            history_text += "\nIMPORTANT: Address the issues from previous iterations!\n"
-            history_text += "=== END FEEDBACK ===\n\n"
+        file_paths = {}
 
-        # Build comprehensive prompt
-        prompt = f"""Generate a Python tool implementation based on the following detailed plan.
+        try:
+            # 1. Write function specification
+            function_spec_file = plan_dir / "function_spec.txt"
+            with open(function_spec_file, 'w') as f:
+                f.write(f"# Function Specification for {plan.requirement_name}\n\n")
+                f.write(f"## Function Signature\n\n")
+                f.write(f"```python\n{tool_definition.signature}\n```\n\n")
 
-{history_text}
+                f.write(f"## Docstring\n\n")
+                f.write(f"```\n{tool_definition.docstring}\n```\n\n")
 
-=== TOOL SPECIFICATION ===
+                f.write(f"## Example Usage\n\n")
+                f.write(f"```python\n{tool_definition.example_call}\n```\n\n")
 
-Tool Name: {plan.requirement_name}
-Description: {plan.requirement_description}
+                f.write(f"## Contracts\n\n")
+                for i, contract in enumerate(tool_definition.contracts, 1):
+                    f.write(f"{i}. {contract}\n")
 
-File Location: tools/{plan.job_id}/{plan.task_id}/{plan.requirement_name}.py
+            file_paths["function_spec"] = str(function_spec_file)
+            logger.info(f"Wrote function specification to: {function_spec_file}")
 
-=== IMPLEMENTATION PLAN ===
+            # 2. Write implementation plan
+            plan_file = plan_dir / "implementation_plan.txt"
+            with open(plan_file, 'w') as f:
+                f.write(f"# Implementation Plan for {plan.requirement_name}\n\n")
+                f.write(f"## Description\n{plan.requirement_description}\n\n")
 
-{steps_text}
+                f.write("## Implementation Steps\n\n")
+                for step in plan.steps:
+                    f.write(f"### Step {step.step_number}: {step.action}\n")
+                    f.write(f"{step.description}\n\n")
+                    if step.apis_used:
+                        f.write(f"**APIs Used:** {', '.join(step.apis_used)}\n\n")
+                    f.write(f"**Error Handling:** {step.error_handling}\n\n")
 
-Pseudo-Code:
-{plan.pseudo_code}
+                if plan.pseudo_code:
+                    f.write(f"## Pseudo-Code\n\n```python\n{plan.pseudo_code}\n```\n\n")
 
-{validation_text}
+                f.write(f"## Expected Artifacts\n\n")
+                for artifact in plan.expected_artifacts:
+                    f.write(f"- {artifact}\n")
 
-Expected Artifacts:
-{', '.join(plan.expected_artifacts)}
+            file_paths["plan"] = str(plan_file)
+            logger.info(f"Wrote implementation plan to: {plan_file}")
 
-=== API REFERENCES ===
+            # 3. Write validation rules
+            validation_file = plan_dir / "validation_rules.txt"
+            with open(validation_file, 'w') as f:
+                f.write(f"# Validation Rules for {plan.requirement_name}\n\n")
+                for i, rule in enumerate(plan.validation_rules, 1):
+                    f.write(f"{i}. {rule}\n")
 
-{api_refs_text}
+            file_paths["validation"] = str(validation_file)
+            logger.info(f"Wrote validation rules to: {validation_file}")
 
-=== IMPLEMENTATION REQUIREMENTS ===
+            # 4. Write iteration history (if exists)
+            if iteration_history:
+                history_file = context_dir / "iteration_history.txt"
+                with open(history_file, 'w') as f:
+                    f.write(f"# Iteration History for {plan.requirement_name}\n\n")
+                    f.write("This tool has been implemented before. Review previous iterations to avoid repeating mistakes.\n\n")
 
-1. **Type Annotations:**
-   - Use strict type hints for all parameters and return values
-   - Import from typing: List, Dict, Optional, Union, etc.
+                    for summary in iteration_history:
+                        f.write(f"## Iteration {summary.iteration}\n\n")
+                        f.write(f"**What Failed:** {summary.what_failed}\n\n")
+                        f.write(f"**Changes Made:** {summary.what_changed}\n\n")
+                        f.write(f"**Why Changed:** {summary.why_changed}\n\n")
+                        f.write(f"**Next Focus:** {summary.next_focus}\n\n")
+                        f.write("---\n\n")
 
-2. **Docstring:**
-   - Follow Google-style docstring format
-   - Include Args, Returns, Raises, Examples sections
-   - Specify units where applicable
+                file_paths["history"] = str(history_file)
+                logger.info(f"Wrote iteration history to: {history_file}")
 
-3. **Validation:**
-   - Implement ALL validation rules from the plan
-   - Use assertions or explicit checks
-   - Raise appropriate exceptions (ValueError, RuntimeError, TypeError)
+            # 5. Write API reference summary
+            api_summary_file = plan_dir / "api_summary.txt"
+            with open(api_summary_file, 'w') as f:
+                f.write(f"# API References for {plan.requirement_name}\n\n")
 
-4. **Error Handling:**
-   - Follow error handling specified in each step
-   - Provide clear error messages
-   - Catch and re-raise with context
+                if exploration_report.api_refs_file:
+                    f.write(f"**Full API Reference File:** {exploration_report.api_refs_file}\n\n")
 
-5. **Stateless Function:**
-   - No global variables
-   - No side effects
-   - Output ONLY via return statement
-   - Do not modify input parameters
+                f.write("## Top API Functions\n\n")
+                for api in exploration_report.apis[:5]:
+                    f.write(f"### {api.function_name}\n")
+                    f.write(f"{api.description}\n\n")
+                    if api.examples:
+                        f.write(f"**Example:**\n```python\n{api.examples[0].code}\n```\n\n")
 
-6. **Code Quality:**
-   - Follow PEP 8 style guidelines
-   - Use descriptive variable names
-   - Add comments for complex logic
-   - Keep functions focused and simple
+            file_paths["api_summary"] = str(api_summary_file)
+            logger.info(f"Wrote API summary to: {api_summary_file}")
 
-7. **Dependencies:**
-   - Import only necessary libraries
-   - Use standard libraries: rdkit, ase, pymatgen, pyscf
-   - Handle import errors gracefully
+            return file_paths
 
-=== OUTPUT FORMAT ===
+        except Exception as e:
+            logger.error(f"Failed to write context files: {e}")
+            return {}
 
-Generate a single Python file at: tools/{plan.job_id}/{plan.task_id}/{plan.requirement_name}.py
+    def _build_enhanced_prompt(
+        self,
+        plan: ImplementationPlan,
+        exploration_report: ExplorationReport,
+        iteration_history: List[IterationSummary],
+        context_files: Dict[str, str]
+    ) -> str:
+        """
+        Build brief implementation prompt with file references.
 
-The file should contain:
-1. Module docstring
-2. Imports (grouped: standard lib, third-party, typing)
-3. Main function implementation
-4. No main block or example execution code
+        Args:
+            plan: Implementation plan
+            exploration_report: API findings
+            iteration_history: Previous iteration summaries
+            context_files: Dict mapping file purpose to file path
 
-Example structure:
-```python
-\"\"\"
-Module for [tool purpose].
+        Returns:
+            Brief prompt for LLM backend with file references
+        """
+        # Build relative paths for the LLM to reference
+        tools_dir_rel = f"tools/{plan.job_id}/{plan.task_id}"
 
-This module provides [description].
-\"\"\"
+        # Build context file references
+        context_refs = []
+        if "function_spec" in context_files:
+            context_refs.append(f"- Function specification: {context_files['function_spec']}")
+        if "plan" in context_files:
+            context_refs.append(f"- Implementation plan: {context_files['plan']}")
+        if "validation" in context_files:
+            context_refs.append(f"- Validation rules: {context_files['validation']}")
+        if "api_summary" in context_files:
+            context_refs.append(f"- API reference summary: {context_files['api_summary']}")
+        if exploration_report.api_refs_file:
+            context_refs.append(f"- Full API references: {exploration_report.api_refs_file}")
+        if "history" in context_files:
+            context_refs.append(f"- Previous iteration feedback: {context_files['history']}")
 
-# Standard library imports
-import json
-from typing import List, Dict, Optional
+        context_refs_text = "\n".join(context_refs)
 
-# Third-party imports
-import rdkit
-from rdkit import Chem
-from rdkit.Chem import Descriptors
+        # Build brief prompt
+        prompt = f"""You are implementing or updating a Python chemistry computation tool based on detailed specifications stored in files.
 
-def {plan.requirement_name}(...) -> ...:
-    \"\"\"
-    [Complete docstring]
-    \"\"\"
-    # Implementation following the plan steps
-    pass
-```
+## Task
 
-Generate the tool now, following ALL requirements and the implementation plan.
+**Tool Name:** {plan.requirement_name}
+**Description:** {plan.requirement_description}
+**Target File:** {tools_dir_rel}/{plan.requirement_name}.py
+
+## Context Files
+
+Read and follow the specifications in these files:
+
+{context_refs_text}
+
+## Instructions
+
+1. **Read all context files** to understand the complete requirements
+2. **Start with the function specification** to understand the exact signature, docstring, and contracts
+3. **Follow the implementation plan** step by step
+4. **Implement all validation rules** from the validation file
+5. **Use the API references** to call the correct library functions
+6. **Address previous feedback** if iteration history exists (this means you need to UPDATE the existing file, not create from scratch)
+7. **Follow the Tool Definition Standard** above:
+   - Return Dict[str, Any] with "success", "error", "result" keys
+   - Never raise exceptions - return errors via dict
+   - Keep function stateless (no global state, no side effects)
+   - Output only via return statement
+
+## Implementation Requirements
+
+- Use strict type hints: all functions return Dict[str, Any]
+- Follow Google-style docstrings
+- Use try-except to catch ALL errors and return error dict
+- Validate all inputs before processing
+- Group imports: standard library, third-party, typing
+- No main block or example execution code
+
+## Output
+
+Generate/update the tool file at: {tools_dir_rel}/{plan.requirement_name}.py
+
+If the file already exists, UPDATE it based on the feedback in the iteration history. Otherwise, create it from scratch.
 """
 
         return prompt
@@ -272,36 +337,21 @@ Generate the tool now, following ALL requirements and the implementation plan.
         backend = self.settings.llm_backend.lower()
 
         try:
+            # Execute backend-specific query
             if backend == "codex":
-                # Import here to avoid circular dependency
-                from app.utils.codex_utils import _run_codex_command
-
-                # Build Codex command
-                cmd = [
-                    "codex", "exec",
-                    "--model", "gpt-5",
-                    "--dangerously-bypass-approvals-and-sandbox",
-                    "--skip-git-repo-check",
-                    "--cd", str(self.settings.tools_service_path),
-                    prompt
-                ]
-
-                # Execute command
-                result = await _run_codex_command(cmd, timeout=300)
-
+                from app.utils.codex_utils import run_codex_query
+                result = await run_codex_query(
+                    query=prompt,
+                    working_dir=str(self.settings.tools_service_path),
+                    timeout=300
+                )
             elif backend == "claude":
-                # Import here to avoid circular dependency
-                from app.utils.claude_utils import _run_claude_command
-
-                # Build Claude Code command
-                cmd = [
-                    "claude",
-                    "--dangerously-skip-permissions",
-                    "-p", prompt
-                ]
-
-                # Execute command
-                result = await _run_claude_command(cmd, cwd=str(self.settings.tools_service_path), timeout=300)
+                from app.utils.claude_utils import run_claude_query
+                result = await run_claude_query(
+                    query=prompt,
+                    working_dir=str(self.settings.tools_service_path),
+                    timeout=300
+                )
             else:
                 return {
                     "success": False,

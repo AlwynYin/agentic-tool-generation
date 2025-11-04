@@ -140,6 +140,12 @@ class Settings(BaseSettings):
         description="Timeout for pytest execution in seconds"
     )
 
+    max_concurrent_tools: int = Field(
+        default=6,
+        env="MAX_CONCURRENT_TOOLS",
+        description="Maximum number of tools to generate concurrently"
+    )
+
     @property
     def tools_service_path(self) -> str:
         """Get the full tools directory path."""

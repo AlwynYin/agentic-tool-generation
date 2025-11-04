@@ -17,7 +17,8 @@ from app.models.pipeline_v2 import (
     ApiFunction,
     CodeExample,
     ParameterSpec,
-    OutputSpec
+    OutputSpec,
+    QuestionAnswer
 )
 from app.utils.llm_backend import execute_llm_browse
 
@@ -63,33 +64,36 @@ class SearchAgent:
         try:
             logger.info(f"Starting documentation exploration for: {tool_definition.name}")
 
-            # Step 1: Identify relevant library
-            library = self._identify_library(tool_definition, open_questions)
-            logger.info(f"Identified library: {library}")
-
-            # Step 2: Build search queries from tool definition and open questions
+            # Step 1: Build search queries from tool definition and open questions
             queries = self._build_search_queries(tool_definition, open_questions)
             logger.info(f"Generated {len(queries)} search queries")
 
-            # Step 3: Execute documentation search
-            # Execute all queries in a single batch call
+            # Step 1.5: Write questions to file for reference
+            if task_id and job_id:
+                self._write_questions_file(open_questions, queries, job_id, task_id)
+
+
+            # Step 2: Execute documentation search across all available libraries
+            # Let the LLM decide which libraries are relevant
             apis = []
             examples = []
             paths = []
             entry_points = []
+            question_answers = []
             api_refs_file = ""
 
-            logger.info(f"Searching documentation with {len(queries)} queries in batch")
-            # Pass all queries at once to execute_llm_browse
-            browse_result = await execute_llm_browse(library, queries, task_id=task_id, job_id=job_id)
+            logger.info(f"Searching documentation across {len(self.available_libraries)} libraries with {len(queries)} queries")
+            # Pass all available libraries to the LLM
+            browse_result = await execute_llm_browse(self.available_libraries, queries, task_id=task_id, job_id=job_id)
 
             if browse_result.success:
-                # Parse the browse result and extract APIs
+                # Parse the browse result and extract APIs and question answers
                 parsed = self._parse_browse_result(browse_result)
                 apis.extend(parsed["apis"])
                 examples.extend(parsed["examples"])
                 paths.extend(parsed["paths"])
                 entry_points.extend(parsed["entry_points"])
+                question_answers.extend(parsed["question_answers"])
 
                 # Track the API reference file
                 if browse_result.output_file:
@@ -97,21 +101,22 @@ class SearchAgent:
             else:
                 logger.warning(f"Batch browse query failed - {browse_result.error}")
 
-            # Step 4: Deduplicate and consolidate findings
+            # Step 3: Deduplicate and consolidate findings
             apis = self._deduplicate_apis(apis)
             examples = self._deduplicate_examples(examples)
             paths = list(set(paths))
             entry_points = list(set(entry_points))
 
-            logger.info(f"Exploration complete: {len(apis)} APIs, {len(examples)} examples")
+            logger.info(f"Exploration complete: {len(apis)} APIs, {len(examples)} examples, {len(question_answers)} answers")
 
-            # Step 5: Create exploration report
+            # Step 4: Create exploration report
             report = ExplorationReport(
                 apis=apis,
                 paths=paths,
                 entry_points=entry_points,
                 examples=examples,
-                api_refs_file=api_refs_file or f"{self.settings.searches_path}/{library}_api_refs_unknown.json"
+                api_refs_file=api_refs_file or f"{self.settings.searches_path}/api_refs_unknown.json",
+                question_answers=question_answers
             )
 
             return report
@@ -124,59 +129,9 @@ class SearchAgent:
                 paths=[],
                 entry_points=[],
                 examples=[],
-                api_refs_file=f"error: {str(e)}"
+                api_refs_file=f"error: {str(e)}",
+                question_answers=[]
             )
-
-    def _identify_library(
-        self,
-        tool_definition: ToolDefinition,
-        open_questions: List[str]
-    ) -> str:
-        """
-        Identify which chemistry library is most relevant.
-
-        Args:
-            tool_definition: Tool specification
-            open_questions: Questions from intake
-
-        Returns:
-            str: Library name (rdkit, ase, pymatgen, pyscf, orca)
-        """
-        # Simple heuristic-based library identification
-        # In a more advanced version, this could use an LLM
-
-        combined_text = (
-            tool_definition.name + " " +
-            tool_definition.signature + " " +
-            tool_definition.docstring + " " +
-            " ".join(open_questions)
-        ).lower()
-
-        # Library keyword patterns
-        library_keywords = {
-            "rdkit": ["smiles", "molecule", "molecular weight", "descriptor", "fingerprint", "mol", "inchi"],
-            "ase": ["atom", "geometry", "optimize", "calculator", "trajectory", "xyz", "structure"],
-            "pymatgen": ["crystal", "structure", "lattice", "material", "cif", "poscar", "band"],
-            "pyscf": ["dft", "scf", "hartree", "fock", "homo", "lumo", "orbital", "quantum", "basis"],
-            "orca": ["orca", "single point", "coupled cluster", "ccsd"]
-        }
-
-        # Score each library
-        scores = {lib: 0 for lib in self.available_libraries}
-        for lib, keywords in library_keywords.items():
-            for keyword in keywords:
-                if keyword in combined_text:
-                    scores[lib] += 1
-
-        # Return library with highest score (default to rdkit if tie)
-        best_library = max(scores.items(), key=lambda x: x[1])
-        logger.info(f"Library scores: {scores}")
-
-        if best_library[1] == 0:
-            logger.warning("No clear library match found, defaulting to rdkit")
-            return "rdkit"
-
-        return best_library[0]
 
     def _build_search_queries(
         self,
@@ -203,6 +158,51 @@ class SearchAgent:
 
         return queries
 
+    def _write_questions_file(
+        self,
+        open_questions: List[str],
+        queries: List[str],
+        job_id: str,
+        task_id: str
+    ) -> str:
+        """
+        Write open questions and generated queries to file.
+
+        Args:
+            open_questions: Original questions from Intake Agent
+            queries: Generated search queries
+            job_id: Job identifier
+            task_id: Task identifier
+
+        Returns:
+            str: Path to the created questions file
+        """
+        from pathlib import Path
+
+        # Create search directory
+        search_dir = Path(self.settings.tools_path) / job_id / task_id / "search"
+        search_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create questions file
+        questions_file = search_dir / "questions.txt"
+
+        try:
+            with open(questions_file, 'w') as f:
+                f.write("# Open Questions from Intake Agent\n\n")
+                for i, question in enumerate(open_questions, 1):
+                    f.write(f"{i}. {question}\n")
+
+                f.write("\n\n# Generated Search Queries\n\n")
+                for i, query in enumerate(queries, 1):
+                    f.write(f"{i}. {query}\n")
+
+            logger.info(f"Wrote questions to: {questions_file}")
+            return str(questions_file)
+
+        except Exception as e:
+            logger.error(f"Failed to write questions file: {e}")
+            return ""
+
     def _parse_browse_result(self, browse_result) -> dict:
         """
         Parse browse result from execute_llm_browse.
@@ -211,17 +211,34 @@ class SearchAgent:
             browse_result: ApiBrowseResult from execute_llm_browse
 
         Returns:
-            dict: Parsed APIs, examples, paths, entry_points
+            dict: Parsed APIs, examples, paths, entry_points, question_answers
         """
+
         apis = []
         examples = []
         paths = []
         entry_points = []
+        question_answers = []
 
         try:
-            # The browse_result has api_functions, examples, relevant_files
-            if hasattr(browse_result, 'api_functions') and browse_result.api_functions:
-                for api_func in browse_result.api_functions:
+            # Parse the JSON search results
+            if browse_result.search_results:
+                search_data = json.loads(browse_result.search_results)
+
+                # Extract question answers (new format from Option 2)
+                if "question_answers" in search_data:
+                    for qa in search_data["question_answers"]:
+                        question_answers.append(QuestionAnswer(
+                            question=qa.get("question", ""),
+                            type=qa.get("type", "api_discovery"),
+                            answer=qa.get("answer", ""),
+                            library=qa.get("library"),
+                            code_example=qa.get("code_example")
+                        ))
+
+                # Extract API functions
+                api_functions_data = search_data.get("api_functions", [])
+                for api_func in api_functions_data:
                     # Convert to our ApiFunction model
                     apis.append(ApiFunction(
                         function_name=api_func.get("function_name", "unknown"),
@@ -254,19 +271,16 @@ class SearchAgent:
                     # Extract entry point (main function to call)
                     entry_points.append(api_func.get("function_name", "unknown"))
 
-            # Extract examples
-            if hasattr(browse_result, 'examples') and browse_result.examples:
-                for ex in browse_result.examples:
-                    examples.append(CodeExample(
-                        code=ex.get("code", ""),
-                        description=ex.get("description", ""),
-                        source=ex.get("source", "documentation")
-                    ))
+                    # Extract examples from API functions
+                    for ex in api_func.get("examples", []):
+                        examples.append(CodeExample(
+                            code=ex.get("code", ""),
+                            description=ex.get("description", ""),
+                            source=ex.get("source", "documentation")
+                        ))
 
-            # Extract relevant file paths
-            if hasattr(browse_result, 'relevant_files') and browse_result.relevant_files:
-                paths.extend(browse_result.relevant_files)
-
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse JSON from browse result: {e}")
         except Exception as e:
             logger.error(f"Error parsing browse result: {e}")
 
@@ -274,7 +288,8 @@ class SearchAgent:
             "apis": apis,
             "examples": examples,
             "paths": paths,
-            "entry_points": entry_points
+            "entry_points": entry_points,
+            "question_answers": question_answers
         }
 
     def _deduplicate_apis(self, apis: List[ApiFunction]) -> List[ApiFunction]:

@@ -20,7 +20,6 @@ from app.models.specs import UserToolRequirement
 from app.repositories.task_repository import TaskRepository
 from app.repositories.tool_repository import ToolRepository
 from app.repositories.tool_failure_repository import ToolFailureRepository
-from app.agents.pipeline import ToolGenerationPipeline
 from app.agents.pipeline_v2 import ToolGenerationPipelineV2
 from app.config import get_settings
 
@@ -29,6 +28,11 @@ logger = logging.getLogger(__name__)
 
 class TaskService:
     """Service for managing task workflows and orchestration."""
+
+    # Class-level semaphore to limit concurrent tool generation
+    # Shared across all TaskService instances
+    # Initialized on first use to use settings value
+    _concurrency_semaphore = None
 
     def __init__(
         self,
@@ -53,13 +57,12 @@ class TaskService:
         # Initialize settings
         self.settings = get_settings()
 
-        # Initialize Chemistry Tool Pipeline (V1 or V2 based on config)
-        # if self.settings.pipeline_version == "v2":
-        #     logger.info("Using Pipeline V2 (multi-agent iterative)")
+        # Initialize class-level semaphore on first instance creation
+        if TaskService._concurrency_semaphore is None:
+            TaskService._concurrency_semaphore = asyncio.Semaphore(self.settings.max_concurrent_tools)
+            logger.info(f"Initialized concurrency semaphore with limit: {self.settings.max_concurrent_tools}")
+
         self.pipeline = ToolGenerationPipelineV2()
-        # else:
-        #     logger.info("Using Pipeline V1 (single-agent)")
-        #     self.pipeline = ToolGenerationPipeline()
 
         self.websocket_manager = websocket_manager
         self.active_workflows: Dict[str, asyncio.Task] = {}
@@ -288,89 +291,82 @@ class TaskService:
         """
         Execute agent workflow for SINGLE tool generation.
 
+        Limited to 6 concurrent executions via class-level semaphore.
+
         Args:
             task_id: Task ID (MongoDB _id)
             job_id: Job ID (MongoDB _id)
         """
-        try:
-            logger.info(f"Starting single tool generation workflow for task {task_id}")
+        # Acquire semaphore to limit concurrency
+        async with self._concurrency_semaphore:
+            max_concurrent = self.settings.max_concurrent_tools
+            currently_running = max_concurrent - self._concurrency_semaphore._value
+            logger.info(f"Starting tool generation for task {task_id} ({currently_running}/{max_concurrent} slots in use)")
 
-            # Get task data
-            task = await self.task_repo.get_by_id(task_id)
-            if not task:
-                raise ValueError(f"Task not found: {task_id}")
+            try:
+                logger.info(f"Starting single tool generation workflow for task {task_id}")
 
-            # Create operation context and process through pipeline
-            # Pass SINGLE requirement to pipeline
-            # For V2 pipeline, also pass job_id to organize search results in task directory
-            # if hasattr(self.pipeline, 'process_tool_generation'):
-            #     # Check if pipeline accepts job_id parameter (V2) or not (V1)
-            #     import inspect
-            #     sig = inspect.signature(self.pipeline.process_tool_generation)
-            #     if 'job_id' in sig.parameters:
-            #         # V2 pipeline - pass job_id
-            #         )
-            #     else:
-            #         # V1 pipeline - no job_id parameter
-            #         output = await self.pipeline.process_tool_generation(task.id, task.tool_requirement)
-            # else:
-            #     output = await self.pipeline.process_tool_generation(task.id, task.tool_requirement)
-            output = await self.pipeline.process_tool_generation(
-                task_id=task.task_id,
-                requirement=task.tool_requirement,
-                job_id=task.job_id  # Short job_id like "job_abc123"
-            )
+                # Get task data
+                task = await self.task_repo.get_by_id(task_id)
+                if not task:
+                    raise ValueError(f"Task not found: {task_id}")
 
-            # Log summary
-            logger.info(f"Generation complete: {output.success_count} successful, {output.failure_count} failed")
+                output = await self.pipeline.process_tool_generation(
+                    task_id=task.task_id,
+                    requirement=task.tool_requirement,
+                    job_id=task.job_id  # Short job_id like "job_abc123"
+                )
 
-            # Store the result (either success OR failure)
-            if output.results:
-                # Should be exactly 1 result
-                await self._store_tool_spec(task_id, job_id, output.results[0])
-            elif output.failures:
-                # Should be exactly 1 failure
-                await self._store_generation_failure(task_id, job_id, output.failures[0])
-            else:
-                # Neither success nor failure - this is an error
-                raise ValueError("Pipeline returned neither success nor failure")
+                # Log summary
+                logger.info(f"Generation complete: {output.success_count} successful, {output.failure_count} failed")
 
-            # Mark task as completed
-            await self._update_task_status(task_id, TaskStatus.COMPLETED)
-            logger.info(f"Agent workflow completed for task {task_id}")
+                # Store the result (either success OR failure)
+                if output.results:
+                    # Should be exactly 1 result
+                    await self._store_tool_spec(task_id, job_id, output.results[0])
+                elif output.failures:
+                    # Should be exactly 1 failure
+                    await self._store_generation_failure(task_id, job_id, output.failures[0])
+                else:
+                    # Neither success nor failure - this is an error
+                    raise ValueError("Pipeline returned neither success nor failure")
 
-        except asyncio.CancelledError:
-            logger.info(f"Workflow cancelled for task {task_id}")
-            await self._update_task_status(task_id, TaskStatus.FAILED, "Workflow cancelled")
-            # Notify job that tool failed
-            from app.services.job_service import JobService
-            job_service = JobService()
-            await job_service.decrement_in_progress(job_id)
-            await job_service.increment_failed(job_id)
+                # Mark task as completed
+                await self._update_task_status(task_id, TaskStatus.COMPLETED)
+                logger.info(f"Agent workflow completed for task {task_id}")
 
-        except Exception as e:
-            error_msg = f"Workflow failed: {str(e)}"
-            logger.error(f"Workflow failed for task {task_id}: {e}")
-            await self._update_task_status(task_id, TaskStatus.FAILED, error_msg)
+            except asyncio.CancelledError:
+                logger.info(f"Workflow cancelled for task {task_id}")
+                await self._update_task_status(task_id, TaskStatus.FAILED, "Workflow cancelled")
+                # Notify job that tool failed
+                from app.services.job_service import JobService
+                job_service = JobService()
+                await job_service.decrement_in_progress(job_id)
+                await job_service.increment_failed(job_id)
 
-            # Notify via WebSocket that workflow failed
-            await self._notify_task_update(task_id, {
-                "type": "workflow-failed",
-                "task_id": task_id,
-                "error": error_msg,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            })
+            except Exception as e:
+                error_msg = f"Workflow failed: {str(e)}"
+                logger.error(f"Workflow failed for task {task_id}: {e}")
+                await self._update_task_status(task_id, TaskStatus.FAILED, error_msg)
 
-            # Notify job that tool failed
-            from app.services.job_service import JobService
-            job_service = JobService()
-            await job_service.decrement_in_progress(job_id)
-            await job_service.increment_failed(job_id)
+                # Notify via WebSocket that workflow failed
+                await self._notify_task_update(task_id, {
+                    "type": "workflow-failed",
+                    "task_id": task_id,
+                    "error": error_msg,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                })
 
-        finally:
-            # Clean up workflow tracking
-            if task_id in self.active_workflows:
-                del self.active_workflows[task_id]
+                # Notify job that tool failed
+                from app.services.job_service import JobService
+                job_service = JobService()
+                await job_service.decrement_in_progress(job_id)
+                await job_service.increment_failed(job_id)
+
+            finally:
+                # Clean up workflow tracking
+                if task_id in self.active_workflows:
+                    del self.active_workflows[task_id]
 
     async def _store_tool_spec(self, task_id: str, job_id: str, tool_result: ToolGenerationResult) -> None:
         """

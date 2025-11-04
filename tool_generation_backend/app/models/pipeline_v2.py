@@ -26,7 +26,6 @@ class ToolDefinition(BaseModel):
     signature: str = Field(..., description="Full Python function signature with type hints")
     docstring: str = Field(..., description="Comprehensive docstring with parameters, returns, examples")
     contracts: List[str] = Field(default_factory=list, description="Pre/post conditions and validation rules")
-    example_call: str = Field(..., description="Example usage code snippet")
 
 
 class IntakeOutput(BaseModel):
@@ -81,6 +80,17 @@ class ApiFunction(BaseModel):
     examples: List[CodeExample] = Field(default_factory=list)
 
 
+class QuestionAnswer(BaseModel):
+    """
+    Answer to an open question from Intake Agent.
+    """
+    question: str = Field(..., description="Original question from Intake Agent")
+    type: str = Field(..., description="Type: 'api_discovery', 'method_selection', 'parameter_tuning', 'format_handling', 'error_handling', 'units'")
+    answer: str = Field(..., description="Detailed answer extracted from documentation")
+    library: Optional[str] = Field(None, description="Relevant library (rdkit, ase, pymatgen, pyscf, orca)")
+    code_example: Optional[str] = Field(None, description="Code snippet demonstrating the answer")
+
+
 class ExplorationReport(BaseModel):
     """
     Consolidated report from Search Agent exploration.
@@ -90,6 +100,7 @@ class ExplorationReport(BaseModel):
     entry_points: List[str] = Field(default_factory=list, description="Main functions to call")
     examples: List[CodeExample] = Field(default_factory=list, description="Code examples from docs/tests")
     api_refs_file: str = Field(..., description="Path to generated API reference file (.md or .json)")
+    question_answers: List[QuestionAnswer] = Field(default_factory=list, description="Answers to open questions from Intake Agent")
 
 
 # ===== Planner Agent Models =====
@@ -115,12 +126,8 @@ class ImplementationPlan(BaseModel):
     requirement_name: str = Field(..., description="Tool name from requirement")
     requirement_description: str = Field(..., description="Tool description")
 
-    # API references
-    api_refs: List[str] = Field(default_factory=list, description="List of API function names to use")
-
     # V2 additions
     steps: List[PlanStep] = Field(default_factory=list, description="Step-by-step execution plan")
-    pseudo_code: str = Field(..., description="Pseudo-code outline of implementation")
     validation_rules: List[str] = Field(default_factory=list, description="Data validation rules to implement")
     expected_artifacts: List[str] = Field(default_factory=list, description="Expected output files/data structures")
 

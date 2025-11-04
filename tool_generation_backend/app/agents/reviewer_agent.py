@@ -12,6 +12,7 @@ import agents
 from agents import Agent, Runner
 
 from app.config import get_settings
+from app.constants import STANDARD_TOOL_DEFINITION
 from app.models.pipeline_v2 import (
     ReviewInput,
     ReviewReport,
@@ -223,12 +224,14 @@ Provide detailed feedback for re-implementation if rejected.
 
     def _get_agent_instructions(self) -> str:
         """Get system instructions for the reviewer agent."""
-        return """
+        return f"""
 You are a Code Review Agent specialized in reviewing chemistry computation tools.
+
+{STANDARD_TOOL_DEFINITION}
 
 ## Your Mission:
 
-Review tool implementations and test results to decide if the tool is ready for deployment or needs re-implementation.
+Review tool implementations and test results to decide if the tool is ready for deployment or needs re-implementation. All tools must follow the Tool Definition Standard above.
 
 ## Review Criteria:
 
@@ -242,8 +245,9 @@ Review tool implementations and test results to decide if the tool is ready for 
 **Code Correctness:**
 - ✅ Handles edge cases (None, empty strings, invalid inputs)
 - ✅ Correct API usage (based on plan)
-- ✅ Proper error handling (raises appropriate exceptions)
-- ✅ Returns correct output type
+- ✅ Proper error handling (returns errors via dict, never raises exceptions)
+- ✅ Returns correct output type (Dict[str, Any] with success, error, result keys)
+- ✅ Stateless (no global state, no side effects, output only via return)
 
 **If ANY test fails → REJECT with required changes.**
 
