@@ -6,7 +6,7 @@ precise Tool Definition for downstream agents.
 """
 
 import logging
-from typing import Optional
+from typing import Optional, List
 
 import agents
 from agents import Agent, Runner
@@ -33,9 +33,14 @@ class IntakeAgent:
     7. Identify open questions for Search Agent
     """
 
-    def __init__(self):
-        """Initialize the intake agent."""
+    def __init__(self, available_packages: List[str]):
+        """Initialize the intake agent.
+
+        Args:
+            available_packages: List of available package names for tool implementation
+        """
         self.settings = get_settings()
+        self.available_packages = available_packages
         self._agent = None
 
     def _ensure_agent(self):
@@ -140,6 +145,9 @@ Follow the validation criteria in your instructions carefully.
 
     def _get_agent_instructions(self) -> str:
         """Get system instructions for the intake agent."""
+        # Format available packages list
+        packages_list = ", ".join(self.available_packages)
+
         return f"""
 You are an Agent specialized in validating and normalizing chemistry computation tool requests.
 
@@ -148,6 +156,11 @@ You are an Agent specialized in validating and normalizing chemistry computation
 ## Your Mission:
 
 Analyze user tool requirements and synthesize a precise, well-defined Tool Definition that downstream agents can implement. All tools must follow the Tool Definition Standard above.
+
+## Available Libraries:
+
+The following Python packages are available for tool implementation:
+{packages_list}
 
 ## Workflow:
 
@@ -160,7 +173,7 @@ Analyze user tool requirements and synthesize a precise, well-defined Tool Defin
 - Chemistry science related (molecules, structures, properties, calculations)
 - Clear input and output specifications
 - Scientifically meaningful (not nonsensical)
-- Implementable with standard libraries (rdkit, ase, pymatgen, pyscf, orca)
+- Implementable with the available libraries listed above
 
 **INVALID Requirements:**
 - Multiple tools in one request (e.g., "calculate molecular weight AND optimize geometry")

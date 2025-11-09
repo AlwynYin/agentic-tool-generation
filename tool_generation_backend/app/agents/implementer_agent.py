@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from app.config import get_settings
-from app.constants import STANDARD_TOOL_DEFINITION
 from app.models.pipeline_v2 import (
     ToolDefinition,
     ImplementationPlan,
@@ -18,7 +17,7 @@ from app.models.pipeline_v2 import (
     ImplementationResult,
     IterationSummary
 )
-from app.utils.llm_backend import execute_llm_implement
+from app.utils.llm_backend import execute_llm_query
 
 logger = logging.getLogger(__name__)
 
@@ -36,9 +35,15 @@ class ImplementerAgent:
     6. Ensure stateless function
     """
 
-    def __init__(self):
-        """Initialize the implementer agent."""
+    def __init__(self, available_packages: List[str]):
+        """Initialize the implementer agent.
+
+        Args:
+            available_packages: List of available package names for implementation
+        """
         self.settings = get_settings()
+        self.available_packages = available_packages
+        logger.info(f"Initialized implementer agent with {len(self.available_packages)} available packages")
 
     async def implement(
         self,
@@ -66,12 +71,15 @@ class ImplementerAgent:
             context_files = self._write_context_files(tool_definition, plan, exploration_report, iteration_history)
 
             # Build brief implementation prompt
-            prompt = self._build_enhanced_prompt(plan, exploration_report, iteration_history, context_files)
+            prompt = self._build_prompt(plan, exploration_report, iteration_history, context_files)
 
-            # Execute LLM backend to generate tool file
-            # Note: execute_llm_implement expects a simplified plan format
-            # We'll use the existing execute_llm_implement but with enhanced prompt
-            result = await self._execute_llm_with_prompt(plan, prompt)
+            # Execute LLM backend to generate tool file using centralized executor
+            result = await execute_llm_query(
+                prompt=prompt,
+                job_id=plan.job_id,
+                task_id=plan.task_id,
+                expected_file_name=f"{plan.requirement_name}.py"
+            )
 
             if result["success"]:
                 # Read generated code
@@ -147,9 +155,6 @@ class ImplementerAgent:
                 f.write(f"## Docstring\n\n")
                 f.write(f"```\n{tool_definition.docstring}\n```\n\n")
 
-                f.write(f"## Example Usage\n\n")
-                f.write(f"```python\n{tool_definition.example_call}\n```\n\n")
-
                 f.write(f"## Contracts\n\n")
                 for i, contract in enumerate(tool_definition.contracts, 1):
                     f.write(f"{i}. {contract}\n")
@@ -170,9 +175,6 @@ class ImplementerAgent:
                     if step.apis_used:
                         f.write(f"**APIs Used:** {', '.join(step.apis_used)}\n\n")
                     f.write(f"**Error Handling:** {step.error_handling}\n\n")
-
-                if plan.pseudo_code:
-                    f.write(f"## Pseudo-Code\n\n```python\n{plan.pseudo_code}\n```\n\n")
 
                 f.write(f"## Expected Artifacts\n\n")
                 for artifact in plan.expected_artifacts:
@@ -209,31 +211,13 @@ class ImplementerAgent:
                 file_paths["history"] = str(history_file)
                 logger.info(f"Wrote iteration history to: {history_file}")
 
-            # 5. Write API reference summary
-            api_summary_file = plan_dir / "api_summary.txt"
-            with open(api_summary_file, 'w') as f:
-                f.write(f"# API References for {plan.requirement_name}\n\n")
-
-                if exploration_report.api_refs_file:
-                    f.write(f"**Full API Reference File:** {exploration_report.api_refs_file}\n\n")
-
-                f.write("## Top API Functions\n\n")
-                for api in exploration_report.apis[:5]:
-                    f.write(f"### {api.function_name}\n")
-                    f.write(f"{api.description}\n\n")
-                    if api.examples:
-                        f.write(f"**Example:**\n```python\n{api.examples[0].code}\n```\n\n")
-
-            file_paths["api_summary"] = str(api_summary_file)
-            logger.info(f"Wrote API summary to: {api_summary_file}")
-
             return file_paths
 
         except Exception as e:
             logger.error(f"Failed to write context files: {e}")
             return {}
 
-    def _build_enhanced_prompt(
+    def _build_prompt(
         self,
         plan: ImplementationPlan,
         exploration_report: ExplorationReport,
@@ -263,10 +247,8 @@ class ImplementerAgent:
             context_refs.append(f"- Implementation plan: {context_files['plan']}")
         if "validation" in context_files:
             context_refs.append(f"- Validation rules: {context_files['validation']}")
-        if "api_summary" in context_files:
-            context_refs.append(f"- API reference summary: {context_files['api_summary']}")
         if exploration_report.api_refs_file:
-            context_refs.append(f"- Full API references: {exploration_report.api_refs_file}")
+            context_refs.append(f"- API references and Question Answers: {exploration_report.api_refs_file}")
         if "history" in context_files:
             context_refs.append(f"- Previous iteration feedback: {context_files['history']}")
 
@@ -289,26 +271,12 @@ Read and follow the specifications in these files:
 
 ## Instructions
 
-1. **Read all context files** to understand the complete requirements
-2. **Start with the function specification** to understand the exact signature, docstring, and contracts
-3. **Follow the implementation plan** step by step
-4. **Implement all validation rules** from the validation file
-5. **Use the API references** to call the correct library functions
-6. **Address previous feedback** if iteration history exists (this means you need to UPDATE the existing file, not create from scratch)
-7. **Follow the Tool Definition Standard** above:
-   - Return Dict[str, Any] with "success", "error", "result" keys
-   - Never raise exceptions - return errors via dict
-   - Keep function stateless (no global state, no side effects)
-   - Output only via return statement
-
-## Implementation Requirements
-
-- Use strict type hints: all functions return Dict[str, Any]
-- Follow Google-style docstrings
-- Use try-except to catch ALL errors and return error dict
-- Validate all inputs before processing
-- Group imports: standard library, third-party, typing
-- No main block or example execution code
+1. **Use all context files** to understand the complete requirements
+2. **Follow the implementation plan** step by step
+3. **Implement all validation rules** from the validation file
+4. **Use the API references** to call the correct library functions
+5. **Address previous feedback** if iteration history exists (this means you need to UPDATE the existing file, not create from scratch)
+6. Check tools/tool_schema.txt for format of the file and key requirements of the tool function
 
 ## Output
 
@@ -318,74 +286,6 @@ If the file already exists, UPDATE it based on the feedback in the iteration his
 """
 
         return prompt
-
-    async def _execute_llm_with_prompt(
-        self,
-        plan: ImplementationPlan,
-        prompt: str
-    ) -> dict:
-        """
-        Execute LLM backend CLI with custom prompt.
-
-        Args:
-            plan: Implementation plan (for task_id, job_id, requirement info)
-            prompt: Custom prompt to use
-
-        Returns:
-            dict: Execution result
-        """
-        backend = self.settings.llm_backend.lower()
-
-        try:
-            # Execute backend-specific query
-            if backend == "codex":
-                from app.utils.codex_utils import run_codex_query
-                result = await run_codex_query(
-                    query=prompt,
-                    working_dir=str(self.settings.tools_service_path),
-                    timeout=300
-                )
-            elif backend == "claude":
-                from app.utils.claude_utils import run_claude_query
-                result = await run_claude_query(
-                    query=prompt,
-                    working_dir=str(self.settings.tools_service_path),
-                    timeout=300
-                )
-            else:
-                return {
-                    "success": False,
-                    "tool_name": plan.requirement_name,
-                    "error": f"Unknown LLM backend: {backend}"
-                }
-
-            # Check if file was created
-            tools_dir = Path(self.settings.tools_path) / plan.job_id / plan.task_id
-            output_file = tools_dir / f"{plan.requirement_name}.py"
-
-            if result["success"] and output_file.exists():
-                logger.info(f"Tool file generated: {output_file}")
-                return {
-                    "success": True,
-                    "tool_name": plan.requirement_name,
-                    "output_file": str(output_file)
-                }
-            else:
-                logger.error(f"Tool file not created: {output_file}")
-                return {
-                    "success": False,
-                    "tool_name": plan.requirement_name,
-                    "error": f"File not created: {output_file}",
-                    "stderr": result.get("stderr", "")
-                }
-
-        except Exception as e:
-            logger.error(f"Error executing {backend}: {e}")
-            return {
-                "success": False,
-                "tool_name": plan.requirement_name,
-                "error": str(e)
-            }
 
     async def cleanup(self):
         """Clean up implementer agent resources if needed."""

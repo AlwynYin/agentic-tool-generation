@@ -16,6 +16,8 @@ import json
 from app.config import get_settings
 from app.models import ToolRequirement, ImplementationPlan
 from app.models.api_reference import ApiBrowseResult
+from app.utils.codex_utils import run_codex_query
+from app.utils.claude_utils import run_claude_query
 
 logger = logging.getLogger(__name__)
 
@@ -42,95 +44,10 @@ def authenticate_llm() -> bool:
         return False
 
 
-async def execute_llm_implement(plan: ImplementationPlan) -> Dict[str, Any]:
-    """
-    Execute LLM backend to implement/generate code.
-
-    Args:
-        plan: Implementation plan containing job_id, task_id, requirement, and api_refs
-
-    Returns:
-        Dict with implementation result
-    """
-    settings = get_settings()
-    backend = settings.llm_backend.lower()
-    tool_name = plan.requirement.name
-
-    try:
-        logger.info(f"Using {backend.upper()} backend for implementation")
-
-        # Get the actual tools directory path with job_id and task_id subdirectories
-        tools_dir = Path(settings.tools_path) / plan.job_id / plan.task_id
-        tools_dir.mkdir(parents=True, exist_ok=True)
-
-        # Build the implementation prompt (shared across all backends)
-        prompt = _build_implementation_prompt(plan.requirement, plan.api_refs, plan.job_id, plan.task_id, settings)
-
-        # Execute backend-specific command
-        if backend == "codex":
-            from app.utils.codex_utils import run_codex_query
-            result = await run_codex_query(
-                query=prompt,
-                working_dir=settings.tools_service_path,
-                timeout=300
-            )
-        elif backend == "claude":
-            from app.utils.claude_utils import run_claude_query
-            result = await run_claude_query(
-                query=prompt,
-                working_dir=settings.tools_service_path,
-                timeout=300
-            )
-        else:
-            return {
-                "success": False,
-                "tool_name": tool_name,
-                "error": f"Unknown LLM backend: {backend}"
-            }
-
-        # Check if file was created
-        output_file = tools_dir / f"{tool_name}.py"
-
-        if result["success"]:
-            if output_file.exists():
-                logger.info(f"Tool generated successfully: {output_file}")
-                return {
-                    "success": True,
-                    "tool_name": tool_name,
-                    "output_file": str(output_file),
-                }
-            else:
-                logger.warning(f"{backend.upper()} completed but file not found: {output_file}")
-                logger.warning(f"stdout: {result['stdout']}")
-                logger.warning(f"stderr: {result['stderr']}")
-                return {
-                    "success": False,
-                    "tool_name": tool_name,
-                    "error": f"Generated file not found: {output_file}",
-                }
-        else:
-            logger.error(f"{backend.upper()} implementation failed for tool {tool_name}: {result['error']}")
-            logger.error(f"stdout: {result['stdout']}")
-            logger.error(f"stderr: {result['stderr']}")
-            return {
-                "success": False,
-                "tool_name": tool_name,
-                "error": result["error"],
-                "stderr": result["stderr"]
-            }
-
-    except Exception as e:
-        logger.error(f"Exception in {backend.upper()} implementation for tool {tool_name}: {e}")
-        return {
-            "success": False,
-            "tool_name": tool_name,
-            "error": str(e)
-        }
-
-
 async def execute_llm_browse(
     libraries: List[str],
-    queries: List[str],
+    questions: List[str],
+    questions_file_path: str,
     task_id: Optional[str] = None,
     job_id: Optional[str] = None
 ) -> ApiBrowseResult:
@@ -139,7 +56,8 @@ async def execute_llm_browse(
 
     Args:
         libraries: List of available library names (rdkit, ase, pymatgen, pyscf, orca)
-        queries: List of search queries (open questions from Intake Agent)
+        questions: List of open questions from Intake Agent
+        questions_file_path: Path to file with questions
         task_id: Optional task ID for V2 pipeline
         job_id: Optional job ID for V2 pipeline
 
@@ -148,10 +66,6 @@ async def execute_llm_browse(
     """
     settings = get_settings()
     backend = settings.llm_backend.lower()
-
-    # Ensure queries is a list
-    if not isinstance(queries, list):
-        queries = [queries]
 
     try:
         logger.info(f"Using {backend.upper()} backend for browsing across libraries: {', '.join(libraries)}")
@@ -172,24 +86,21 @@ async def execute_llm_browse(
             return ApiBrowseResult(
                 success=False,
                 library="none",
-                queries=queries,
+                queries=questions,
                 error=f"No library directories found in {repos_dir}. Requested: {libraries}"
             )
 
         logger.info(f"Available libraries: {', '.join(available_libraries)}")
 
-        # Load navigation guides for all available libraries
-        nav_guides = []
+        # Collect navigation guide filenames for all available libraries
+        nav_guide_files = []
         for lib in available_libraries:
             nav_guide_path = repos_dir / f"{lib.lower()}.md"
             if nav_guide_path.exists():
-                with open(nav_guide_path, 'r') as f:
-                    nav_guides.append(f"## {lib.upper()} Navigation Guide\n{f.read()}")
-                logger.info(f"Loaded navigation guide for {lib}")
+                nav_guide_files.append(str(nav_guide_path))
+                logger.info(f"Found navigation guide for {lib}: {nav_guide_path}")
             else:
                 logger.warning(f"Navigation guide not found: {nav_guide_path}")
-
-        nav_guide_content = "\n\n".join(nav_guides) if nav_guides else "No navigation guides available."
 
         # Create output filename with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -212,37 +123,53 @@ async def execute_llm_browse(
             logger.info(f"Using V1 global search directory: {output_path}")
 
         # Build the browsing prompt (shared across all backends)
-        prompt = _build_browse_prompt(available_libraries, queries, nav_guide_content, settings, output_path_relative)
+        prompt = _build_browse_prompt(available_libraries, questions_file_path, nav_guide_files, settings, output_path_relative)
+        logger.debug(f"Browse prompt length: {len(prompt)} characters")
+        logger.debug(f"Browse prompt (first 500 chars): {prompt[:500]}")
 
+        timeout_sec = 600
         # Execute backend-specific command
+        logger.info(f"Executing {backend.upper()} browse command...")
+        logger.info(f"Working directory: {settings.tools_service_path}")
+        logger.info(f"Timeout: {timeout_sec} seconds")
+        logger.info(f"Expected output file: {output_path}")
+
         if backend == "codex":
-            from app.utils.codex_utils import run_codex_query
             result = await run_codex_query(
                 query=prompt,
                 working_dir=settings.tools_service_path,
-                timeout=300
+                timeout=timeout_sec
             )
         elif backend == "claude":
-            from app.utils.claude_utils import run_claude_query
             result = await run_claude_query(
                 query=prompt,
                 working_dir=settings.tools_service_path,
-                timeout=300
+                timeout=timeout_sec
             )
         else:
             return ApiBrowseResult(
                 success=False,
                 library=",".join(libraries),
-                queries=queries,
+                queries=questions,
                 error=f"Unknown LLM backend: {backend}"
             )
 
+        logger.info(f"{backend.upper()} command completed with success={result['success']}")
+        logger.debug(f"Result keys: {result.keys()}")
+
+        if result.get("stdout"):
+            logger.debug(f"Command stdout (first 1000 chars): {result['stdout'][:1000]}")
+        if result.get("stderr"):
+            logger.debug(f"Command stderr (first 1000 chars): {result['stderr'][:1000]}")
+
         if not result["success"]:
             logger.error(f"{backend.upper()} command failed: {result['error']}")
+            logger.error(f"Full stdout: {result.get('stdout', 'N/A')}")
+            logger.error(f"Full stderr: {result.get('stderr', 'N/A')}")
             return ApiBrowseResult(
                 success=False,
                 library=",".join(libraries),
-                queries=queries,
+                queries=questions,
                 file_name='',
                 error=result["error"]
             )
@@ -254,7 +181,7 @@ async def execute_llm_browse(
             return ApiBrowseResult(
                 success=False,
                 library=",".join(libraries),
-                queries=queries,
+                queries=questions,
                 file_name=str(output_filename),
                 error=f"Output file not created by {backend.upper()}: {output_path}"
             )
@@ -272,7 +199,7 @@ async def execute_llm_browse(
                 return ApiBrowseResult(
                     success=False,
                     library=",".join(libraries),
-                    queries=queries,
+                    queries=questions,
                     file_name=str(output_filename),
                     error=f"Invalid JSON in output file: {e}"
                 )
@@ -281,7 +208,7 @@ async def execute_llm_browse(
             return ApiBrowseResult(
                 success=True,
                 library=",".join(libraries),
-                queries=queries,
+                queries=questions,
                 file_name=str(output_filename),
                 search_results=search_results_content,
                 output_file=str(output_path)
@@ -292,7 +219,7 @@ async def execute_llm_browse(
             return ApiBrowseResult(
                 success=False,
                 library=",".join(libraries),
-                queries=queries,
+                queries=questions,
                 file_name=str(output_filename),
                 error=f"Failed to read output file: {e}"
             )
@@ -304,92 +231,125 @@ async def execute_llm_browse(
         return ApiBrowseResult(
             success=False,
             library=",".join(libraries),
-            queries=queries,
+            queries=questions,
             error=str(e)
         )
 
 
-def _build_implementation_prompt(
-    requirement: ToolRequirement,
-    api_refs: List[str],
+async def execute_llm_query(
+    prompt: str,
     job_id: str,
     task_id: str,
-    settings
-) -> str:
+    expected_file_name: str
+) -> Dict[str, Any]:
     """
-    Build a detailed implementation prompt for LLM backend.
+    Execute LLM backend with a custom prompt.
+
+    Generic executor that allows agents to provide their own prompts.
 
     Args:
-        requirement: Tool requirement specification
-        api_refs: List of API reference file paths
-        job_id: Job ID for organizing tool files
-        task_id: Task ID for organizing tool files
-        settings: Application settings
+        prompt: Custom prompt to send to LLM
+        job_id: Job identifier
+        task_id: Task identifier
+        expected_file_name: Name of the file expected to be created (e.g., "tool_name.py")
 
     Returns:
-        Formatted prompt string
+        Dict with execution result
     """
-    tool_name = requirement.name
-    tools_dir_relative = f"{settings.tools_dir}/{job_id}/{task_id}"
+    settings = get_settings()
+    backend = settings.llm_backend.lower()
 
-    prompt_parts = [
-        f"Create a Python tool file named {tools_dir_relative}/{tool_name}.py with the following requirement:",
-        "",
-    ]
+    try:
+        logger.info(f"Executing {backend.upper()} with custom prompt")
+        logger.info(f"Job ID: {job_id}, Task ID: {task_id}")
+        logger.info(f"Expected file: {expected_file_name}")
+        logger.debug(f"Prompt length: {len(prompt)} characters")
+        logger.debug(f"Prompt (first 500 chars): {prompt[:500]}")
 
-    if api_refs:
-        prompt_parts.extend([
-            "## Api References:",
-            "In this file are Api references that may be helpful, inspect this file before implementation",
-            *api_refs
-        ])
+        # Execute backend-specific command
+        logger.info(f"Executing {backend.upper()} query command...")
+        logger.info(f"Working directory: {settings.tools_service_path}")
+        logger.info(f"Timeout: 300 seconds")
 
-    prompt_parts.extend([
-        "## Tool Requirement:",
-        f"### Function: {requirement.name}",
-        f"**Description:** {requirement.description}",
-        "",
-        "**Parameters:**"
-    ])
+        if backend == "codex":
+            result = await run_codex_query(
+                query=prompt,
+                working_dir=settings.tools_service_path,
+                timeout=300
+            )
+        elif backend == "claude":
+            result = await run_claude_query(
+                query=prompt,
+                working_dir=settings.tools_service_path,
+                timeout=300
+            )
+        else:
+            return {
+                "success": False,
+                "error": f"Unknown LLM backend: {backend}"
+            }
 
-    for input_spec in requirement.input_format:
-        prompt_parts.extend([
-            f"name: {input_spec.name}",
-            f"type: {input_spec.type}",
-            f"description: {input_spec.description}",
-        ])
+        logger.info(f"{backend.upper()} query command completed with success={result['success']}")
+        logger.debug(f"Result keys: {result.keys()}")
 
-    # Add return specification
-    output = requirement.output_format
-    prompt_parts.extend([
-        "",
-        f"**Output:** {output.type} - {output.description}",
-        ""
-    ])
+        if result.get("stdout"):
+            logger.info(f"Command stdout (first 1000 chars): {result['stdout'][:1000]}")
+        if result.get("stderr"):
+            logger.warning(f"Command stderr (first 1000 chars): {result['stderr'][:1000]}")
 
-    # Add implementation requirements
-    prompt_parts.extend([
-        "## Implementation Requirements:",
-        "1. Include proper type hints and docstrings",
-        "2. Handle errors gracefully with try/catch blocks",
-        "3. Return results in a structured format with success/error indicators",
-        "4. Include chemistry-specific validation where appropriate",
-        "5. Use appropriate chemistry libraries (rdkit, ase, pymatgen, pyscf) as needed",
-        "6. Tools can read from the file system when parameters specify file paths",
-        f"7. Check {settings.tools_dir}/template.txt for a template (if available)",
-        "",
-        "",
-        "Generate the complete, production-ready tool implementation.",
-        f"Save the file as {tools_dir_relative}/{tool_name}.py"
-    ])
+        # Check if expected file was created
+        tools_dir = Path(settings.tools_path) / job_id / task_id
+        output_file = tools_dir / expected_file_name
+        logger.info(f"Checking for output file: {output_file}")
+        logger.info(f"File exists: {output_file.exists()}")
 
-    return "\n".join(prompt_parts)
+        if result["success"]:
+            if output_file.exists():
+                logger.info(f"File generated successfully: {output_file}")
+                file_size = output_file.stat().st_size
+                logger.info(f"File size: {file_size} bytes")
+                return {
+                    "success": True,
+                    "output_file": str(output_file),
+                }
+            else:
+                logger.error(f"{backend.upper()} completed but file not found: {output_file}")
+                logger.error(f"Expected directory: {tools_dir}")
+                logger.error(f"Directory exists: {tools_dir.exists()}")
+                if tools_dir.exists():
+                    files_in_dir = list(tools_dir.iterdir())
+                    logger.error(f"Files in directory: {[f.name for f in files_in_dir]}")
+                logger.error(f"Full stdout: {result.get('stdout', 'N/A')}")
+                logger.error(f"Full stderr: {result.get('stderr', 'N/A')}")
+                return {
+                    "success": False,
+                    "error": f"Expected file not created: {output_file}",
+                    "stderr": result.get("stderr", "")
+                }
+        else:
+            logger.error(f"{backend.upper()} execution failed: {result['error']}")
+            logger.error(f"Full stdout: {result.get('stdout', 'N/A')}")
+            logger.error(f"Full stderr: {result.get('stderr', 'N/A')}")
+            return {
+                "success": False,
+                "error": result["error"],
+                "stderr": result.get("stderr", "")
+            }
+
+    except Exception as e:
+        logger.error(f"Exception in {backend.upper()} execution: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 
 def _build_browse_prompt(
     libraries: List[str],
-    queries: List[str],
-    nav_guide_content: str,
+    questions_file_path: str,
+    nav_guide_files: List[str],
     settings,
     output_path_relative: str
 ) -> str:
@@ -398,30 +358,34 @@ def _build_browse_prompt(
 
     Args:
         libraries: List of available library names
-        queries: List of search queries (open questions)
-        nav_guide_content: Navigation guide content
+        questions_file_path: Path to file containing questions from Intake Agent
+        nav_guide_files: List of navigation guide file paths
         settings: Application settings
         output_path_relative: Relative path for output file
 
     Returns:
         Formatted prompt string
     """
-    queries_text = "\n".join([f"  {i+1}. {q}" for i, q in enumerate(queries)])
     library_dirs = "\n".join([f"  - {lib}: {settings.repos_dir}/{lib.lower()}" for lib in libraries])
 
-    return f"""You are tasked with researching chemistry library documentation to answer questions and extract API references.
+    # Build navigation guide file references
+    if nav_guide_files:
+        nav_guides_text = "\n".join([f"  - {file}" for file in nav_guide_files])
+        nav_guide_section = f"""<Navigation Guide Files>
+Read these navigation guide files to understand how to navigate each library's documentation:
+{nav_guides_text}
+</Navigation Guide Files>"""
+    else:
+        nav_guide_section = "<Navigation Guide Files>\nNo navigation guides available.\n</Navigation Guide Files>"
 
-<Navigation Guide>
-{nav_guide_content}
-</Navigation Guide>
+    return f"""You are tasked with researching chemistry library documentation to answer questions and extract API references.
+Questions are located in {questions_file_path}
+
+{nav_guide_section}
 
 <Available Libraries>
 {library_dirs}
 </Available Libraries>
-
-<Open Questions>
-{queries_text}
-</Open Questions>
 
 Your task:
 1. For EACH question above, determine which library (if any) is most relevant
@@ -448,8 +412,6 @@ Output your findings as JSON with this EXACT structure:
           "name": "param1",
           "type": "str",
           "description": "Parameter description",
-          "required": true,
-          "default": null
         }}
       ],
       "output_schema": {{
@@ -470,11 +432,7 @@ Output your findings as JSON with this EXACT structure:
 
 Guidelines:
 - For API discovery questions: Extract the specific function(s) needed
-- For method selection questions: Compare options and recommend the best approach
-- For parameter tuning questions: Provide reasonable default values with justification
-- For format handling questions: Show how to parse/convert data formats
-- For error handling questions: List common exceptions and how to handle them
-- For units questions: Specify the units returned by functions
+- For other questions: Answer the question
 
 IMPORTANT:
 - Save your output to: {output_path_relative}

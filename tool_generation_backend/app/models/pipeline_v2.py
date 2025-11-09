@@ -126,6 +126,9 @@ class ImplementationPlan(BaseModel):
     requirement_name: str = Field(..., description="Tool name from requirement")
     requirement_description: str = Field(..., description="Tool description")
 
+    # API references
+    api_refs: List[str] = Field(default_factory=list, description="List of API function names to use")
+
     # V2 additions
     steps: List[PlanStep] = Field(default_factory=list, description="Step-by-step execution plan")
     validation_rules: List[str] = Field(default_factory=list, description="Data validation rules to implement")
@@ -188,7 +191,6 @@ class Issue(BaseModel):
     severity: str = Field(..., description="Severity: 'critical', 'major', or 'minor'")
     category: str = Field(..., description="Category: 'style', 'contracts', 'complexity', 'determinism', 'correctness'")
     description: str
-    location: str = Field(..., description="Line number, function name, or file path")
 
 
 class Change(BaseModel):

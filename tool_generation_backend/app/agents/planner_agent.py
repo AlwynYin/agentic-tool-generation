@@ -6,7 +6,7 @@ from tool definitions and exploration reports.
 """
 
 import logging
-from typing import Optional
+from typing import Optional, List
 
 import agents
 from agents import Agent, Runner
@@ -37,10 +37,16 @@ class PlannerAgent:
     7. Generate pseudo-code outline
     """
 
-    def __init__(self):
-        """Initialize the planner agent."""
+    def __init__(self, available_packages: List[str]):
+        """Initialize the planner agent.
+
+        Args:
+            available_packages: List of available package names for implementation planning
+        """
         self.settings = get_settings()
+        self.available_packages = available_packages
         self._agent = None
+        logger.info(f"Initialized planner agent with {len(self.available_packages)} available packages")
 
     def _ensure_agent(self):
         """Lazy initialization of the agent."""
@@ -229,6 +235,7 @@ ImplementationPlan(
     job_id="",  # Will be filled by system
     requirement_name="",  # Will be filled by system
     requirement_description="",  # Will be filled by system
+    api_refs=[], # a list of apis to be used
     steps=[PlanStep(...), PlanStep(...), ...],
     validation_rules=["Rule 1", "Rule 2", ...],
     expected_artifacts=["file1.py", "data structure description", ...]

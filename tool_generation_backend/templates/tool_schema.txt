@@ -25,15 +25,14 @@ def [MAIN_FUNCTION_NAME](
     Returns:
         [RETURN_TYPE]: [Description of what is returned]
 
-    Raises:
-        ValueError: [Description of when this is raised]
-        TypeError: [Description of when this is raised]
     """
     try:
         # Input validation
         if not isinstance([PARAMETER_1], [EXPECTED_TYPE]):
-            raise TypeError(f"Expected {[EXPECTED_TYPE].__name__}, got
-{type([PARAMETER_1]).__name__}")
+            return {
+                "success": False,
+                "error": f"Expected {[EXPECTED_TYPE].__name__}, got {type([PARAMETER_1]).__name__}",
+                "error_type": "TypeError"
 
         # Main logic here
         result = {
@@ -72,6 +71,35 @@ if __name__ == "__main__":
     example_result = [MAIN_FUNCTION_NAME]([EXAMPLE_ARGS])
     print(json.dumps(example_result, indent=2))
 
+## Tool:
+
+A Tool is a Python function that does one single computation task, with a well-typed and documented input and output schema.
+
+**Requirements:**
+
+1. **Single Purpose**: The tool should not be over-complicated with multiple capabilities. If there are multiple separate jobs, there should be multiple separate tools.
+
+2. **Stateless**: The tool must be completely stateless. This means:
+   - No global state usage
+   - No modification of outer scope variables
+   - Output ONLY via Python's `return` statement
+   - No modification of input parameters
+
+3. **Error Handling**: The tool should not raise errors during execution. Instead, it should reflect errors in the return value through the standard return format.
+
+4. **Return Format**: The tool must always return a dictionary with keys including but not limited to:
+   - `"success"`: bool indicating if the operation succeeded
+   - `"error"`: str or None containing error message if success is False
+   - `"result"`: The actual result data (type depends on tool, None if error)
+   - `"metadata"`: metadata about the call
+
+**Key Points:**
+- Never use `raise` statements - return error via dict
+- Always validate inputs before processing
+- Always validate outputs before returning
+- Handle all exceptions and convert to error dict
+- Keep functions pure and deterministic
+
 ## Key Requirements:
 
 1. Function Structure:
@@ -82,6 +110,7 @@ if __name__ == "__main__":
 2. Return Format:
   - Always return a dictionary with "success" boolean
   - Include error handling with structured error responses
+  - MUST NOT raise any error, return with "success": False instead
   - Provide metadata about the operation
 
 3. File System Access:
@@ -91,4 +120,3 @@ if __name__ == "__main__":
 4. Execution Guard:
   - Include if __name__ == "__main__": block for testing
   - No code should execute at module level during import
-

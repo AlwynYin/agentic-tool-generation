@@ -16,6 +16,7 @@ from app.models.tool_generation import ToolGenerationOutput, ToolGenerationResul
 from app.models.pipeline_v2 import IterationData, IterationSummary
 from app.utils.pytest_runner import get_pytest_runner
 from app.utils.code_parser import parse_function_from_code, extract_description_from_code
+from app.utils.task_logger import get_task_logger, log_divider, log_multiline
 from app.agents.intake_agent import IntakeAgent
 from app.agents.search_agent import SearchAgent
 from app.agents.planner_agent import PlannerAgent
@@ -23,6 +24,7 @@ from app.agents.implementer_agent import ImplementerAgent
 from app.agents.test_agent import TestAgent
 from app.agents.reviewer_agent import ReviewerAgent
 from app.agents.summarizer_agent import SummarizerAgent
+from app.services.repository_service import RepositoryService
 
 logger = logging.getLogger(__name__)
 
@@ -48,11 +50,16 @@ class ToolGenerationPipelineV2:
         """Initialize the pipeline with all agents."""
         self.settings = get_settings()
 
-        # Initialize all agents
-        self.intake_agent = IntakeAgent()
-        self.search_agent = SearchAgent()
-        self.planner_agent = PlannerAgent()
-        self.implementer_agent = ImplementerAgent()
+        # Load available packages from repository service
+        repository_service = RepositoryService()
+        available_packages = repository_service.get_available_packages()
+        logger.info(f"Loaded {len(available_packages)} available packages: {available_packages}")
+
+        # Initialize all agents with available packages
+        self.intake_agent = IntakeAgent(available_packages=available_packages)
+        self.search_agent = SearchAgent(available_packages=available_packages)
+        self.planner_agent = PlannerAgent(available_packages=available_packages)
+        self.implementer_agent = ImplementerAgent(available_packages=available_packages)
         self.test_agent = TestAgent()
         self.reviewer_agent = ReviewerAgent()
         self.summarizer_agent = SummarizerAgent()
@@ -82,12 +89,32 @@ class ToolGenerationPipelineV2:
         Returns:
             ToolGenerationOutput: Generation result (success or failure)
         """
+        # Initialize task-specific file logging
+        pipeline_logger = get_task_logger("pipeline", job_id or "unknown", task_id)
+
         try:
             logger.info(f"Starting pipeline V2 for task {task_id}: {requirement.description[:100]}...")
 
+            # Debug log: Pipeline start
+            log_divider(pipeline_logger, "PIPELINE START")
+            pipeline_logger.debug(f"Task ID: {task_id}")
+            pipeline_logger.debug(f"Job ID: {job_id}")
+            pipeline_logger.debug(f"Requirement Description: {requirement.description}")
+            pipeline_logger.debug(f"Requirement Input: {requirement.input}")
+            pipeline_logger.debug(f"Requirement Output: {requirement.output}")
+
             # ===== STEP 1: INTAKE =====
+            log_divider(pipeline_logger, "STEP 1: INTAKE")
             logger.info("Step 1: Intake - Validating requirement")
-            intake_output = await self.intake_agent.process(requirement)
+            intake_output = await self.intake_agent.process(requirement,
+                                                            #job_id, task_id
+                                                            )
+
+            pipeline_logger.debug(f"Intake validation status: {intake_output.validation_status}")
+            if intake_output.tool_definition:
+                pipeline_logger.debug(f"Tool name: {intake_output.tool_definition.name}")
+                pipeline_logger.debug(f"Tool signature: {intake_output.tool_definition.signature}")
+                pipeline_logger.debug(f"Open questions count: {len(intake_output.open_questions)}")
 
             if intake_output.validation_status == "invalid":
                 logger.error(f"Requirement validation failed: {intake_output.error}")
@@ -118,6 +145,7 @@ class ToolGenerationPipelineV2:
             logger.debug(f"open questions: {open_questions}")
 
             # ===== STEP 2: SEARCH =====
+            log_divider(pipeline_logger, "STEP 2: SEARCH")
             logger.info("Step 2: Search - Exploring APIs and documentation")
             exploration_report = await self.search_agent.explore(
                 tool_definition,
@@ -127,7 +155,12 @@ class ToolGenerationPipelineV2:
             )
             logger.info(f"Found {len(exploration_report.apis)} APIs, {len(exploration_report.examples)} examples")
 
+            pipeline_logger.debug(f"APIs found: {len(exploration_report.apis)}")
+            pipeline_logger.debug(f"Examples found: {len(exploration_report.examples)}")
+            pipeline_logger.debug(f"Question answers: {len(exploration_report.question_answers)}")
+
             # ===== STEP 3: PLAN =====
+            log_divider(pipeline_logger, "STEP 3: PLAN")
             logger.info("Step 3: Plan - Creating implementation plan")
             plan = await self.planner_agent.create_plan(
                 tool_definition,
@@ -137,15 +170,23 @@ class ToolGenerationPipelineV2:
             )
             logger.info(f"Plan created with {len(plan.steps)} steps")
 
+            pipeline_logger.debug(f"Plan steps count: {len(plan.steps)}")
+            pipeline_logger.debug(f"Validation rules count: {len(plan.validation_rules)}")
+            pipeline_logger.debug(f"API refs: {plan.api_refs}")
+
             # ===== STEPS 4-9: ITERATIVE REFINEMENT LOOP =====
             iteration_history = []
 
             for iteration in range(1, self.max_iterations + 1):
+                log_divider(pipeline_logger, f"ITERATION {iteration}/{self.max_iterations}")
                 logger.info(f"Starting iteration {iteration}/{self.max_iterations}")
+                pipeline_logger.debug(f"Iteration history entries: {len(iteration_history)}")
 
                 # === STEP 4: IMPLEMENT ===
+                pipeline_logger.debug(f"Step 4: Implementing tool (iteration {iteration})")
                 logger.info(f"Step 4 (iter {iteration}): Implement - Generating tool code")
                 impl_result = await self.implementer_agent.implement(
+                    tool_definition,
                     plan,
                     exploration_report,
                     iteration_history
@@ -163,12 +204,17 @@ class ToolGenerationPipelineV2:
                     )
 
                 logger.info(f"Tool implemented: {impl_result.tool_file_path}")
+                pipeline_logger.debug(f"Implementation success: {impl_result.success}")
+                pipeline_logger.debug(f"Tool file: {impl_result.tool_file_path}")
+                pipeline_logger.debug(f"Tool code length: {len(impl_result.tool_code)} chars")
 
                 # === STEP 5: GENERATE TESTS ===
+                pipeline_logger.debug(f"Step 5: Generating tests (iteration {iteration})")
                 logger.info(f"Step 5 (iter {iteration}): Test - Generating test suite")
                 test_result = await self.test_agent.generate_tests(
                     tool_definition,
                     plan,
+                    exploration_report,
                     iteration_history
                 )
 
@@ -184,46 +230,49 @@ class ToolGenerationPipelineV2:
                     )
 
                 logger.info(f"Tests generated: {test_result.test_file_path}")
+                pipeline_logger.debug(f"Test generation success: {test_result.success}")
+                pipeline_logger.debug(f"Test file: {test_result.test_file_path}")
+                pipeline_logger.debug(f"Test types: {test_result.test_types}")
+                pipeline_logger.debug(f"Fixtures created: {len(test_result.fixtures_created)}")
 
                 # === STEP 6: RUN TESTS ===
-                logger.info(f"Step 6 (iter {iteration}): Running pytest (SKIPPED FOR TESTING)")
-                # TEMPORARY: Skip actual test execution for testing purposes
-                # Mock successful test results
-                from app.models.pipeline_v2 import TestResults
-                test_results = TestResults(
-                    passed=5,
-                    failed=0,
-                    errors=0,
-                    failures=[],
-                    duration=1.5
-                )
-                logger.info(
-                    f"Test results (MOCKED): {test_results.passed} passed, "
-                    f"{test_results.failed} failed, {test_results.errors} errors"
+                pipeline_logger.debug(f"Step 6: Running pytest (iteration {iteration})")
+                logger.info(f"Step 6 (iter {iteration}): Running pytest")
+
+                task_dir = Path(self.settings.tools_path) / job_id / task_id
+                test_results = await self.pytest_runner.run_tests(
+                    test_result.test_file_path,
+                    working_dir=str(task_dir),
+                    # job_id=job_id,
+                    # task_id=task_id
                 )
 
-                # ORIGINAL CODE (commented out):
-                # task_dir = Path(self.settings.tools_path) / job_id / task_id
-                # test_results = await self.pytest_runner.run_tests(
-                #     test_result.test_file_path,
-                #     working_dir=str(task_dir)
-                # )
+                pipeline_logger.debug(f"Test results: {test_results.passed} passed, {test_results.failed} failed, {test_results.errors} errors")
+                pipeline_logger.debug(f"Test duration: {test_results.duration:.2f}s")
 
                 # === STEP 7: REVIEW ===
+                pipeline_logger.debug(f"Step 7: Reviewing (iteration {iteration})")
                 logger.info(f"Step 7 (iter {iteration}): Review - Analyzing code and results")
                 review_report = await self.reviewer_agent.review(
                     tool_code=impl_result.tool_code,
                     test_code=test_result.test_code,
                     test_results=test_results,
                     plan=plan,
-                    iteration=iteration
+                    iteration=iteration,
+                    # job_id=job_id,
+                    # task_id=task_id
                 )
 
                 logger.info(f"Review complete: approved={review_report.approved}")
+                pipeline_logger.debug(f"Review approved: {review_report.approved}")
+                pipeline_logger.debug(f"Review issues: {len(review_report.issues)}")
 
                 if review_report.approved:
                     # === SUCCESS - TOOL APPROVED ===
+                    log_divider(pipeline_logger, "TOOL APPROVED")
                     logger.info(f"✅ Tool approved after {iteration} iteration(s)")
+                    pipeline_logger.debug(f"Total iterations: {iteration}")
+                    pipeline_logger.debug(f"Final tool file: {impl_result.tool_file_path}")
 
                     # Parse input and output schemas from the ACTUAL generated code
                     # This is more accurate than using the tool definition
@@ -257,6 +306,7 @@ class ToolGenerationPipelineV2:
                     )
 
                 # === STEP 8: SUMMARIZE ===
+                pipeline_logger.debug(f"Step 8: Summarizing iteration {iteration}")
                 logger.info(f"Step 8 (iter {iteration}): Summarize - Compressing iteration data")
                 summary = await self.summarizer_agent.summarize(
                     IterationData(
@@ -265,11 +315,15 @@ class ToolGenerationPipelineV2:
                         failures=test_results.failures,
                         review_report=review_report,
                         plan=plan
-                    )
+                    ),
+                    # job_id=job_id,
+                    # task_id=task_id
                 )
 
                 iteration_history.append(summary)
                 logger.info(f"Iteration {iteration} summary: {summary.what_failed[:100]}...")
+                pipeline_logger.debug(f"What failed: {summary.what_failed}")
+                pipeline_logger.debug(f"Next focus: {summary.next_focus}")
 
                 # === STEP 9: LOOP BACK ===
                 if iteration < self.max_iterations:
@@ -323,8 +377,7 @@ class ToolGenerationPipelineV2:
         for api_ref in plan.api_refs:
             # Extract package name (first part of dotted name)
             package = api_ref.split('.')[0].lower()
-            if package in ['rdkit', 'ase', 'pymatgen', 'pyscf', 'orca']:
-                dependencies.add(package)
+            dependencies.add(package)
 
         return sorted(list(dependencies))
 

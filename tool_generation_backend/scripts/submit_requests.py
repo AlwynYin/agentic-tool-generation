@@ -28,21 +28,21 @@ async def test_tool_generation_pipeline():
     # Test job request with one reasonable and one unreasonable requirement
     job_request = {
         "toolRequirements": [
-                {
-                    "description": "Generate a 3D starting geometry from a SMILES string using RDKit (ETKDG + MMFF minimization).",
-                    "input": "SMILES string",
-                    "output": "Initial 3D XYZ geometry in Å as a string"
-                },
-                {
-                    "description": "Validate and normalize an XYZ block (atom symbols, units = Å, no duplicates, sensible bond lengths).",
-                    "input": "XYZ geometry in Å as a string",
-                    "output": "Validated XYZ geometry in Å as a string"
-                },
-                {
-                    "description": "Run HF/def2-SVP gas-phase geometry optimization and return the optimized structure and final SCF energy.",
-                    "input": "XYZ geometry in Å as a string",
-                    "output": "Optimized XYZ geometry in Å as a string and total electronic energy in Hartree"
-                },
+                # {
+                #     "description": "Generate a 3D starting geometry from a SMILES string using RDKit (ETKDG + MMFF minimization).",
+                #     "input": "SMILES string",
+                #     "output": "Initial 3D XYZ geometry in Å as a string"
+                # },
+                # {
+                #     "description": "Validate and normalize an XYZ block (atom symbols, units = Å, no duplicates, sensible bond lengths).",
+                #     "input": "XYZ geometry in Å as a string",
+                #     "output": "Validated XYZ geometry in Å as a string"
+                # },
+                # {
+                #     "description": "Run HF/def2-SVP gas-phase geometry optimization and return the optimized structure and final SCF energy.",
+                #     "input": "XYZ geometry in Å as a string",
+                #     "output": "Optimized XYZ geometry in Å as a string and total electronic energy in Hartree"
+                # },
                 {
                     "description": "Detect the molecular point group from Cartesian coordinates.",
                     "input": "XYZ geometry in Å as a string",

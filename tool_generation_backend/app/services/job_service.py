@@ -10,6 +10,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 
 from app.models.job import Job, JobStatus
+from app.models.task import TaskStatus
 from app.models.specs import UserToolRequirement
 from app.repositories.job_repository import JobRepository
 from app.repositories.task_repository import TaskRepository
@@ -110,29 +111,40 @@ class JobService:
                 tool_failure_repo=self.tool_failure_repo
             )
 
-            # Create tasks for each requirement (in parallel)
-            task_creation_coroutines = []
-            for req in tool_requirements:
-                coro = task_service.create_task(
-                    job_id=job_id,
-                    job_id_short=job_id_short,
-                    user_id=user_id,
-                    requirement=req
-                )
-                task_creation_coroutines.append(coro)
+            # Create and process tasks sequentially (wait for each to complete before starting next)
+            successful_tasks = 0
+            failed_tasks = 0
+            for idx, req in enumerate(tool_requirements, 1):
+                try:
+                    logger.info(f"Starting task {idx}/{len(tool_requirements)} for job {job_id_short}: {req.description}")
 
-            # Wait for all tasks to be created (but not completed)
-            task_ids = await asyncio.gather(*task_creation_coroutines, return_exceptions=True)
+                    # Create task and start its workflow
+                    task_id = await task_service.create_task(
+                        job_id=job_id,
+                        job_id_short=job_id_short,
+                        user_id=user_id,
+                        requirement=req
+                    )
+                    await self.job_repo.add_task_id(job_id, task_id)
 
-            # Filter out exceptions and add task IDs to job
-            for result in task_ids:
-                if isinstance(result, str):  # Successful task creation
-                    await self.job_repo.add_task_id(job_id, result)
-                else:  # Exception occurred
-                    logger.error(f"Failed to create task for job {job_id_short}: {result}")
-                    await self.job_repo.increment_failed(job_id)
+                    # Wait for task to reach terminal state (COMPLETED or FAILED)
+                    completed_task = await task_service.wait_for_task_completion(task_id)
 
-            logger.info(f"Spawned {len([r for r in task_ids if isinstance(r, str)])} tasks for job {job_id_short}")
+                    # Handle both enum and string status values
+                    status_value = completed_task.status.value if isinstance(completed_task.status, TaskStatus) else completed_task.status
+
+                    if status_value == TaskStatus.COMPLETED:
+                        successful_tasks += 1
+                        logger.info(f"Task {idx}/{len(tool_requirements)} completed successfully for job {job_id_short}")
+                    else:
+                        failed_tasks += 1
+                        logger.warning(f"Task {idx}/{len(tool_requirements)} failed for job {job_id_short}: status={status_value}")
+
+                except Exception as task_error:
+                    logger.error(f"Failed to process task {idx}/{len(tool_requirements)} for job {job_id_short}: {task_error}")
+                    failed_tasks += 1
+
+            logger.info(f"All tasks completed for job {job_id_short}: {successful_tasks} succeeded, {failed_tasks} failed")
 
         except Exception as e:
             logger.error(f"Error spawning tasks for job {job_id_short}: {e}")

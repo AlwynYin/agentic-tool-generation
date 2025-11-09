@@ -151,6 +151,18 @@ class RepositoryService:
             logger.error(f"Error saving package config: {e}")
             raise
 
+    def get_available_packages(self) -> List[str]:
+        """
+        Get list of available package names from configuration.
+
+        Returns:
+            List of package names
+        """
+        if not self.configs:
+            self.load_package_config()
+
+        return list(self.configs.keys())
+
     def check_missing_guides(self) -> List[str]:
         """
         Check which packages are missing navigation guides.

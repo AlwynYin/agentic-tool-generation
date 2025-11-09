@@ -10,13 +10,13 @@ from pathlib import Path
 from typing import Dict, List
 
 from app.config import get_settings
-from app.constants import STANDARD_TOOL_DEFINITION
 from app.models.pipeline_v2 import (
     ToolDefinition,
     ImplementationPlan,
     TestResult,
-    IterationSummary
+    IterationSummary, ExplorationReport
 )
+from app.utils.llm_backend import execute_llm_query
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,7 @@ class TestAgent:
         self,
         tool_definition: ToolDefinition,
         plan: ImplementationPlan,
+        exploration_report: ExplorationReport,
         iteration_history: List[IterationSummary]
     ) -> TestResult:
         """
@@ -50,6 +51,7 @@ class TestAgent:
         Args:
             tool_definition: Tool specification from Intake Agent
             plan: Implementation plan from Planner Agent
+            exploration_report: Exploration report from Search Agent
             iteration_history: Summaries from previous iterations
 
         Returns:
@@ -59,13 +61,30 @@ class TestAgent:
             logger.info(f"Generating/updating tests for: {plan.requirement_name}")
 
             # Write test context files
-            context_files = self._write_test_context_files(tool_definition, plan, iteration_history)
+            context_files = self._write_test_context_files(tool_definition, plan, exploration_report, iteration_history)
 
             # Build brief test generation prompt
-            prompt = self._build_test_prompt(tool_definition, plan, iteration_history, context_files)
+            prompt = self._build_test_prompt(tool_definition, plan, exploration_report, iteration_history, context_files)
 
-            # Execute Codex to generate test file
-            result = await self._execute_codex_test_generation(plan, prompt)
+            # Execute LLM backend to generate test file using centralized executor
+            # Note: Test files go in tests/ subdirectory
+            result = await execute_llm_query(
+                prompt=prompt,
+                job_id=plan.job_id,
+                task_id=f"{plan.task_id}/tests",
+                expected_file_name=f"test_{plan.requirement_name}.py"
+            )
+
+            # Check for fixtures created during test generation
+            if result["success"]:
+                test_dir = Path(self.settings.tools_path) / plan.job_id / plan.task_id / "tests"
+                fixtures_dir = test_dir / "data"
+                fixtures_created = []
+                if fixtures_dir.exists():
+                    fixtures_created = [str(f) for f in fixtures_dir.glob("*") if f.is_file()]
+                result["fixtures_created"] = fixtures_created
+                result["test_types"] = ["unit", "integration"]
+                result["test_file_path"] = result["output_file"]
 
             if result["success"]:
                 # Read generated test code
@@ -109,6 +128,7 @@ class TestAgent:
         self,
         tool_definition: ToolDefinition,
         plan: ImplementationPlan,
+        exploration_report: ExplorationReport,
         iteration_history: List[IterationSummary]
     ) -> Dict[str, str]:
         """
@@ -191,6 +211,7 @@ class TestAgent:
         self,
         tool_definition: ToolDefinition,
         plan: ImplementationPlan,
+        exploration_report: ExplorationReport,
         iteration_history: List[IterationSummary],
         context_files: Dict[str, str]
     ) -> str:
@@ -217,6 +238,8 @@ class TestAgent:
             context_refs.append(f"- Test requirements: {context_files['test_requirements']}")
         if "contracts" in context_files:
             context_refs.append(f"- Contracts to validate: {context_files['contracts']}")
+        if exploration_report.api_refs_file:
+            context_refs.append(f"- API references and Question Answers: {exploration_report.api_refs_file}")
         if "history" in context_files:
             context_refs.append(f"- Previous test iteration feedback: {context_files['history']}")
 
@@ -224,8 +247,6 @@ class TestAgent:
 
         # Build brief prompt
         prompt = f"""You are generating or updating comprehensive tests for a Python chemistry computation tool.
-
-{STANDARD_TOOL_DEFINITION}
 
 ## Task
 
@@ -243,10 +264,6 @@ class TestAgent:
 {tool_definition.docstring}
 ```
 
-**Example Usage:**
-```python
-{tool_definition.example_call}
-```
 
 ## Context Files
 
@@ -284,78 +301,6 @@ If the file already exists, UPDATE it based on feedback in the iteration history
 """
 
         return prompt
-
-    async def _execute_codex_test_generation(
-        self,
-        plan: ImplementationPlan,
-        prompt: str
-    ) -> dict:
-        """
-        Execute LLM backend CLI to generate test file.
-
-        Args:
-            plan: Implementation plan
-            prompt: Test generation prompt
-
-        Returns:
-            dict: Execution result
-        """
-        backend = self.settings.llm_backend.lower()
-
-        try:
-            # Execute backend-specific query
-            if backend == "codex":
-                from app.utils.codex_utils import run_codex_query
-                result = await run_codex_query(
-                    query=prompt,
-                    working_dir=str(self.settings.tools_service_path),
-                    timeout=300
-                )
-            elif backend == "claude":
-                from app.utils.claude_utils import run_claude_query
-                result = await run_claude_query(
-                    query=prompt,
-                    working_dir=str(self.settings.tools_service_path),
-                    timeout=300
-                )
-            else:
-                return {
-                    "success": False,
-                    "error": f"Unknown LLM backend: {backend}"
-                }
-
-            # Check if test file was created
-            test_dir = Path(self.settings.tools_path) / plan.job_id / plan.task_id / "tests"
-            test_file = test_dir / f"test_{plan.requirement_name}.py"
-
-            # Check for fixtures
-            fixtures_dir = test_dir / "data"
-            fixtures_created = []
-            if fixtures_dir.exists():
-                fixtures_created = [str(f) for f in fixtures_dir.glob("*") if f.is_file()]
-
-            if result["success"] and test_file.exists():
-                logger.info(f"Test file generated: {test_file}")
-                return {
-                    "success": True,
-                    "test_file_path": str(test_file),
-                    "fixtures_created": fixtures_created,
-                    "test_types": ["unit", "integration"]  # Could parse test file to detect types
-                }
-            else:
-                logger.error(f"Test file not created: {test_file}")
-                return {
-                    "success": False,
-                    "error": f"Test file not created: {test_file}",
-                    "stderr": result.get("stderr", "")
-                }
-
-        except Exception as e:
-            logger.error(f"Error executing {backend} for test generation: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
 
     async def cleanup(self):
         """Clean up test agent resources if needed."""

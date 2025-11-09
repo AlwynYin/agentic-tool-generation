@@ -541,3 +541,33 @@ class TaskService:
                 return "completed"
         else:
             return "running"
+
+    async def wait_for_task_completion(self, task_id: str, poll_interval: float = 1.0) -> Task:
+        """
+        Wait for a task to reach a terminal state (COMPLETED or FAILED).
+
+        Args:
+            task_id: Task ID (MongoDB _id)
+            poll_interval: How often to poll the database (in seconds)
+
+        Returns:
+            Task: The completed task
+
+        Raises:
+            ValueError: If task is not found
+        """
+        logger.info(f"Waiting for task {task_id} to complete...")
+
+        while True:
+            # Get current task status from database
+            task = await self.task_repo.get_by_id(task_id)
+            if not task:
+                raise ValueError(f"Task {task_id} not found")
+
+            # Check if task has reached a terminal state
+            if task.status in [TaskStatus.COMPLETED, TaskStatus.FAILED]:
+                logger.info(f"Task {task_id} reached terminal state: {task.status.value}")
+                return task
+
+            # Wait before polling again
+            await asyncio.sleep(poll_interval)

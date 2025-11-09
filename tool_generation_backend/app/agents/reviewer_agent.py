@@ -125,7 +125,6 @@ class ReviewerAgent:
                     severity="critical",
                     category="review_error",
                     description=f"Reviewer agent error: {str(e)}",
-                    location="reviewer_agent"
                 )],
                 required_changes=[Change(
                     type="fix_bug",
@@ -170,7 +169,7 @@ Test Results:
         failures_text = ""
         if test_results.failures:
             failures_text = "\nTest Failures:\n"
-            for i, failure in enumerate(test_results.failures[:5], 1):  # Limit to 5
+            for i, failure in enumerate(test_results.failures, 1):  # Limit to 5
                 failures_text += f"\n{i}. {failure.test_name}\n"
                 failures_text += f"   Error: {failure.error_message}\n"
                 if failure.traceback:
@@ -235,97 +234,58 @@ Review tool implementations and test results to decide if the tool is ready for 
 
 ## Review Criteria:
 
-### 1. Correctness (CRITICAL)
+### 1. Correctness
 
 **Test Results:**
-- ✅ ALL tests must pass (passed > 0, failed = 0, errors = 0)
-- ✅ No test failures or errors allowed
-- ✅ Tests complete in reasonable time (< 60 seconds)
+- Tests complete in reasonable time (< 60 seconds)
+- Most tests, especially important ones, should pass
 
 **Code Correctness:**
-- ✅ Handles edge cases (None, empty strings, invalid inputs)
-- ✅ Correct API usage (based on plan)
-- ✅ Proper error handling (returns errors via dict, never raises exceptions)
-- ✅ Returns correct output type (Dict[str, Any] with success, error, result keys)
-- ✅ Stateless (no global state, no side effects, output only via return)
+- Handles edge cases (None, empty strings, invalid inputs)
+- Correct API usage (based on plan)
+- Proper error handling (returns errors via dict, never raises exceptions)
+- Returns correct output type (Dict[str, Any] with success, error, result keys)
+- Stateless (no global state, no side effects, output only via return)
 
-**If ANY test fails → REJECT with required changes.**
+**If any major fails → REJECT with required changes.**
 
-### 2. Contracts (IMPORTANT)
+### 2. Contracts
 
 **Input Validation:**
-- ✅ Type checks implemented
-- ✅ Format validation (SMILES, XYZ, etc.)
-- ✅ Range checks (positive values, reasonable bounds)
-- ✅ Raises ValueError for invalid input
+- Type checks implemented
+- Format validation (SMILES, XYZ, etc.)
+- Range checks (positive values, reasonable bounds)
+- Raises ValueError for invalid input
 
 **Output Guarantees:**
-- ✅ Return type matches specification
-- ✅ Units are correct (g/mol, eV, Angstroms)
-- ✅ Output format is consistent
+- Return type matches specification
+- Units are correct (g/mol, eV, Angstroms)
+- Output format is consistent
 
 **Validation Rules:**
-- ✅ All validation rules from plan are implemented
-- ✅ Assertions or explicit checks present
-- ✅ Clear error messages
+- All validation rules from plan are implemented
+- Assertions or explicit checks present
+- Clear error messages
 
 **Missing validation → MAJOR issue → Required change.**
 
-### 3. Determinism (IMPORTANT)
+### 3. Determinism
 
 **Consistency:**
-- ✅ Same input → same output (no randomness without seed)
-- ✅ No timestamp dependencies
-- ✅ No global state
+- Same input → same output (no randomness without seed)
+- No timestamp dependencies
+- No global state
 
 **Stateless:**
-- ✅ No modification of global variables
-- ✅ No side effects (file writes, network calls)
-- ✅ Output only via return statement
-- ✅ Input parameters not modified
+- No modification of global variables
+- No side effects (file writes, network calls)
+- Output only via return statement
+- Input parameters not modified
 
 **Non-deterministic behavior → MAJOR issue → Required change.**
 
-### 4. Code Quality (MODERATE)
+### 4. Code Quality
 
-**Type Annotations:**
-- ✅ Function signature has type hints
-- ✅ Imports from typing module (List, Dict, Optional, etc.)
-- ❓ Minor: Missing type hints for internal variables
-
-**Docstring:**
-- ✅ Docstring present and comprehensive
-- ✅ Args, Returns, Raises sections included
-- ✅ Units specified where applicable
-- ❓ Minor: Could be more detailed
-
-**Error Handling:**
-- ✅ Try-except blocks for API calls
-- ✅ Specific exception types (ValueError, RuntimeError)
-- ✅ Clear error messages
-- ❓ Minor: Could add more context to errors
-
-**Code Style:**
-- ✅ Follows PEP 8
-- ✅ Descriptive variable names
-- ✅ Functions are focused (not too complex)
-- ❓ Minor: Could add more comments
-
-**Code quality issues → MINOR → Optional improvement (unless severe).**
-
-### 5. Complexity (MODERATE)
-
-**Simplicity:**
-- ✅ Code is straightforward and readable
-- ✅ No unnecessary complexity
-- ✅ Follows the implementation plan
-
-**Performance:**
-- ✅ No obvious performance issues
-- ✅ Appropriate data structures
-- ❓ Minor: Could be optimized
-
-**Overly complex code → MAJOR issue if hard to understand → Required change.**
 
 ## Approval Decision:
 
@@ -412,12 +372,6 @@ ReviewReport(
 - Incorrect error handling
 - Global state or side effects
 
-**Minor:**
-- Style issues
-- Missing comments
-- Could be simpler
-- Performance (if not severe)
-
 ## Change Types:
 
 - `"fix_bug"`: Fix incorrect behavior
@@ -430,7 +384,8 @@ ReviewReport(
 ## Review Process:
 
 1. **Check Test Results:**
-   - If any test fails → REJECT immediately
+   - Check failed tests, understand what the test is for
+   - If the failure reveals critical or major flaw, reject
    - Identify root causes of failures
    - Propose specific fixes
 

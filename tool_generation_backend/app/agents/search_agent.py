@@ -37,17 +37,22 @@ class SearchAgent:
     5. Generate exploration report
     """
 
-    def __init__(self):
-        """Initialize the search agent."""
+    def __init__(self, available_packages: List[str]):
+        """Initialize the search agent.
+
+        Args:
+            available_packages: List of available package names for documentation search
+        """
         self.settings = get_settings()
-        self.available_libraries = ["rdkit", "ase", "pymatgen", "pyscf", "orca"]
+        self.available_libraries = available_packages
+        logger.info(f"Initialized search agent with {len(self.available_libraries)} libraries: {self.available_libraries}")
 
     async def explore(
         self,
         tool_definition: ToolDefinition,
         open_questions: List[str],
-        task_id: str = None,
-        job_id: str = None
+        task_id: str = "_",
+        job_id: str = "_"
     ) -> ExplorationReport:
         """
         Explore documentation to find relevant APIs and examples.
@@ -64,14 +69,8 @@ class SearchAgent:
         try:
             logger.info(f"Starting documentation exploration for: {tool_definition.name}")
 
-            # Step 1: Build search queries from tool definition and open questions
-            queries = self._build_search_queries(tool_definition, open_questions)
-            logger.info(f"Generated {len(queries)} search queries")
-
-            # Step 1.5: Write questions to file for reference
-            if task_id and job_id:
-                self._write_questions_file(open_questions, queries, job_id, task_id)
-
+            # Step 1: Write questions to file for reference
+            open_questions_file = self._write_questions_file(open_questions, job_id, task_id)
 
             # Step 2: Execute documentation search across all available libraries
             # Let the LLM decide which libraries are relevant
@@ -82,9 +81,15 @@ class SearchAgent:
             question_answers = []
             api_refs_file = ""
 
-            logger.info(f"Searching documentation across {len(self.available_libraries)} libraries with {len(queries)} queries")
+            logger.info(f"Searching documentation across {len(self.available_libraries)} libraries with {len(open_questions)} questions")
             # Pass all available libraries to the LLM
-            browse_result = await execute_llm_browse(self.available_libraries, queries, task_id=task_id, job_id=job_id)
+            browse_result = await execute_llm_browse(
+                libraries=self.available_libraries,
+                questions=open_questions,
+                questions_file_path=open_questions_file,
+                task_id=task_id,
+                job_id=job_id
+            )
 
             if browse_result.success:
                 # Parse the browse result and extract APIs and question answers
@@ -102,8 +107,6 @@ class SearchAgent:
                 logger.warning(f"Batch browse query failed - {browse_result.error}")
 
             # Step 3: Deduplicate and consolidate findings
-            apis = self._deduplicate_apis(apis)
-            examples = self._deduplicate_examples(examples)
             paths = list(set(paths))
             entry_points = list(set(entry_points))
 
@@ -133,51 +136,23 @@ class SearchAgent:
                 question_answers=[]
             )
 
-    def _build_search_queries(
-        self,
-        tool_definition: ToolDefinition,
-        open_questions: List[str]
-    ) -> List[str]:
-        """
-        Build search queries from tool definition and open questions.
-
-        Args:
-            tool_definition: Tool specification
-            open_questions: Questions to investigate
-
-        Returns:
-            List[str]: Search queries for documentation
-        """
-        queries = []
-
-        # Convert open questions to queries
-        for question in open_questions[:3]:  # Limit to first 3 questions
-            # Clean up question format
-            query = question.replace("?", "").strip()
-            queries.append(f"Documentation for: {query}")
-
-        return queries
-
     def _write_questions_file(
         self,
         open_questions: List[str],
-        queries: List[str],
         job_id: str,
         task_id: str
     ) -> str:
         """
-        Write open questions and generated queries to file.
+        Write open questions to file.
 
         Args:
-            open_questions: Original questions from Intake Agent
-            queries: Generated search queries
+            open_questions: Questions from Intake Agent
             job_id: Job identifier
             task_id: Task identifier
 
         Returns:
             str: Path to the created questions file
         """
-        from pathlib import Path
 
         # Create search directory
         search_dir = Path(self.settings.tools_path) / job_id / task_id / "search"
@@ -191,10 +166,6 @@ class SearchAgent:
                 f.write("# Open Questions from Intake Agent\n\n")
                 for i, question in enumerate(open_questions, 1):
                     f.write(f"{i}. {question}\n")
-
-                f.write("\n\n# Generated Search Queries\n\n")
-                for i, query in enumerate(queries, 1):
-                    f.write(f"{i}. {query}\n")
 
             logger.info(f"Wrote questions to: {questions_file}")
             return str(questions_file)
@@ -291,27 +262,6 @@ class SearchAgent:
             "entry_points": entry_points,
             "question_answers": question_answers
         }
-
-    def _deduplicate_apis(self, apis: List[ApiFunction]) -> List[ApiFunction]:
-        """Deduplicate API functions by function_name."""
-        seen = set()
-        unique_apis = []
-        for api in apis:
-            if api.function_name not in seen:
-                seen.add(api.function_name)
-                unique_apis.append(api)
-        return unique_apis
-
-    def _deduplicate_examples(self, examples: List[CodeExample]) -> List[CodeExample]:
-        """Deduplicate code examples by code content."""
-        seen = set()
-        unique_examples = []
-        for example in examples:
-            code_hash = hash(example.code)
-            if code_hash not in seen:
-                seen.add(code_hash)
-                unique_examples.append(example)
-        return unique_examples
 
     async def cleanup(self):
         """Clean up search agent resources if needed."""
