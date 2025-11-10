@@ -9,6 +9,7 @@ import asyncio
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 
+from app.config import get_settings
 from app.models.job import Job, JobStatus
 from app.models.task import TaskStatus
 from app.models.specs import UserToolRequirement
@@ -77,7 +78,14 @@ class JobService:
 
             # Spawn tasks for each tool requirement (asynchronously)
             # Don't await here - let tasks run in background
-            asyncio.create_task(self._spawn_tasks(job_id, job_id_short, user_id, tool_requirements))
+            # Route to appropriate method based on configuration
+            settings = get_settings()
+            if settings.task_execution_mode == "parallel":
+                logger.info(f"Using parallel task execution mode for job {job_id_short}")
+                asyncio.create_task(self._spawn_tasks_parallel(job_id, job_id_short, user_id, tool_requirements))
+            else:
+                logger.info(f"Using sequential task execution mode for job {job_id_short}")
+                asyncio.create_task(self._spawn_tasks_sequential(job_id, job_id_short, user_id, tool_requirements))
 
             return job_id
 
@@ -85,7 +93,7 @@ class JobService:
             logger.error(f"Error creating job: {e}")
             raise
 
-    async def _spawn_tasks(
+    async def _spawn_tasks_parallel(
         self,
         job_id: str,
         job_id_short: str,
@@ -93,7 +101,10 @@ class JobService:
         tool_requirements: List[UserToolRequirement]
     ):
         """
-        Spawn multiple tasks (one per tool requirement).
+        Spawn multiple tasks (one per tool requirement) that run in parallel.
+
+        Tasks are created immediately and run concurrently, limited by the
+        concurrency semaphore in TaskService (max_concurrent_tools setting).
 
         Args:
             job_id: Job ID (MongoDB _id)
@@ -102,7 +113,67 @@ class JobService:
             tool_requirements: List of tool requirements
         """
         try:
-            logger.info(f"Spawning {len(tool_requirements)} tasks for job {job_id_short}")
+            logger.info(f"Spawning {len(tool_requirements)} tasks for job {job_id_short} (parallel mode)")
+
+            # Import TaskService here to avoid circular imports
+            task_service = TaskService(
+                task_repo=self.task_repo,
+                tool_repo=self.tool_repo,
+                tool_failure_repo=self.tool_failure_repo
+            )
+
+            # Create all tasks immediately - they will run in parallel
+            # Concurrency is controlled by the semaphore in TaskService
+            for idx, req in enumerate(tool_requirements, 1):
+                try:
+                    logger.info(f"Creating task {idx}/{len(tool_requirements)} for job {job_id_short}: {req.description}")
+
+                    # Create task and start its workflow (non-blocking)
+                    task_id = await task_service.create_task(
+                        job_id=job_id,
+                        job_id_short=job_id_short,
+                        user_id=user_id,
+                        requirement=req
+                    )
+                    await self.job_repo.add_task_id(job_id, task_id)
+
+                    logger.info(f"Task {idx}/{len(tool_requirements)} created: {task_id}")
+
+                except Exception as task_error:
+                    logger.error(f"Failed to create task {idx}/{len(tool_requirements)} for job {job_id_short}: {task_error}")
+                    # Increment failed counter since we couldn't even create the task
+                    await self.job_repo.increment_failed(job_id)
+
+            logger.info(f"All {len(tool_requirements)} tasks created for job {job_id_short}. They are now running in parallel.")
+
+        except Exception as e:
+            logger.error(f"Error spawning tasks for job {job_id_short}: {e}")
+            await self.job_repo.update_status(job_id, JobStatus.FAILED, error_message=str(e))
+
+
+
+    async def _spawn_tasks_sequential(
+        self,
+        job_id: str,
+        job_id_short: str,
+        user_id: str,
+        tool_requirements: List[UserToolRequirement]
+    ):
+        """
+        Spawn multiple tasks (one per tool requirement) that run sequentially.
+
+        Each task must reach a terminal state (COMPLETED or FAILED) before
+        the next task is created. This ensures predictable execution order
+        but is slower than parallel mode.
+
+        Args:
+            job_id: Job ID (MongoDB _id)
+            job_id_short: Short job identifier (e.g., job_abc123)
+            user_id: User identifier
+            tool_requirements: List of tool requirements
+        """
+        try:
+            logger.info(f"Spawning {len(tool_requirements)} tasks for job {job_id_short} (sequential mode)")
 
             # Import TaskService here to avoid circular imports
             task_service = TaskService(

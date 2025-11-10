@@ -146,6 +146,12 @@ class Settings(BaseSettings):
         description="Maximum number of tools to generate concurrently"
     )
 
+    task_execution_mode: str = Field(
+        default="parallel",
+        env="TASK_EXECUTION_MODE",
+        description="Task execution mode: 'sequential' (one at a time) or 'parallel' (multiple concurrent, limited by max_concurrent_tools)"
+    )
+
     @property
     def tools_service_path(self) -> str:
         """Get the full tools directory path."""
@@ -203,6 +209,14 @@ class Settings(BaseSettings):
             errors.append(
                 f"LOG_LEVEL must be one of {valid_log_levels}, "
                 f"got: {self.log_level}"
+            )
+
+        # Validate task execution mode
+        valid_execution_modes = {"sequential", "parallel"}
+        if self.task_execution_mode not in valid_execution_modes:
+            errors.append(
+                f"TASK_EXECUTION_MODE must be one of {valid_execution_modes}, "
+                f"got: {self.task_execution_mode}"
             )
 
         if errors:
