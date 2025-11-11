@@ -4,11 +4,14 @@ FROM node:18-slim as frontend-builder
 
 WORKDIR /app/frontend
 
-# Copy frontend package files
-COPY frontend/package.json frontend/package-lock.json* ./
+# Install pnpm
+RUN npm install -g pnpm
 
-# Install frontend dependencies
-RUN npm ci
+# Copy frontend package files
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
+
+# Install frontend dependencies with pnpm
+RUN pnpm install --frozen-lockfile
 
 # Copy frontend source
 COPY frontend/ ./
@@ -18,7 +21,7 @@ COPY frontend/ ./
 ENV VITE_API_URL=/api/v1
 ENV VITE_WS_URL=
 
-RUN npm run build
+RUN pnpm run build
 
 # Stage 2: Backend with frontend included
 FROM python:3.13-slim
