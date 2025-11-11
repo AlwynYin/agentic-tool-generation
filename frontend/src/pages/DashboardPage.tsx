@@ -52,10 +52,30 @@ export const DashboardPage: React.FC = () => {
 
   useEffect(() => {
     loadJobs();
-    // Refresh every 10 seconds to show live updates
-    const interval = setInterval(loadJobs, 10000);
-    return () => clearInterval(interval);
+    // WebSocket provides real-time updates, no polling needed
   }, [loadJobs]);
+
+  // WebSocket updates for job status changes
+  useJobStatusUpdates(null, (status: string, updatedAt: string, jobId?: string) => {
+    if (jobId) {
+      setJobs(prev => prev.map(job =>
+        job.jobId === jobId
+          ? { ...job, status: status as JobStatus, updatedAt }
+          : job
+      ));
+    }
+  });
+
+  // WebSocket updates for job progress changes
+  useJobProgressUpdates(null, (progress: any, jobId?: string) => {
+    if (jobId) {
+      setJobs(prev => prev.map(job =>
+        job.jobId === jobId
+          ? { ...job, progress, updatedAt: new Date().toISOString() }
+          : job
+      ));
+    }
+  });
 
   const handleJobClick = (jobId: string) => {
     navigate(`/jobs/${jobId}`);

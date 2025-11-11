@@ -3,7 +3,22 @@
 import { ToolGenerationRequest, JobResponse, TaskResponse, TaskFilesResponse } from './types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
-const WS_BASE_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000';
+
+// WebSocket URL: if VITE_WS_URL is empty/undefined, construct from window.location
+const getWebSocketUrl = (): string => {
+  const envUrl = import.meta.env.VITE_WS_URL;
+
+  // If explicitly set (even to empty string ""), use window.location
+  if (envUrl === '' || envUrl === undefined) {
+    // Construct WebSocket URL from current page location
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}`;
+  }
+
+  return envUrl;
+};
+
+const WS_BASE_URL = getWebSocketUrl();
 
 export class ApiClient {
   /**

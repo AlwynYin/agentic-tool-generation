@@ -91,14 +91,14 @@ export const JobDetailsPage: React.FC = () => {
   }, [loadJobDetails]);
 
   // WebSocket updates
-  useJobStatusUpdates(jobId || null, (status: string, updatedAt: string) => {
-    if (job) {
+  useJobStatusUpdates(jobId || null, (status: string, updatedAt: string, receivedJobId?: string) => {
+    if (job && receivedJobId === jobId) {
       setJob({ ...job, status: status as JobStatus, updatedAt });
     }
   });
 
-  useJobProgressUpdates(jobId || null, (progress: any) => {
-    if (job) {
+  useJobProgressUpdates(jobId || null, (progress: any, receivedJobId?: string) => {
+    if (job && receivedJobId === jobId) {
       setJob({ ...job, progress, updatedAt: new Date().toISOString() });
     }
   });
@@ -277,7 +277,7 @@ export const JobDetailsPage: React.FC = () => {
       ) : (
         <Grid container spacing={2}>
           {tasks.map((task) => (
-            <Grid item xs={12} sm={6} md={4} key={task.taskId}>
+            <Grid item xs={12} key={task.taskId}>
               <Card>
                 <CardActionArea onClick={() => handleTaskClick(task.taskId)}>
                   <CardContent>

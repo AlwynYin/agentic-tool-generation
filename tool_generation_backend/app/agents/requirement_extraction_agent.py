@@ -14,7 +14,6 @@ from pydantic import BaseModel, Field
 
 from app.config import get_settings
 from app.models.specs import UserToolRequirement
-from app.services.repository_service import RepositoryService
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +38,10 @@ class RequirementExtractionAgent:
         """Initialize the requirement extraction agent."""
         self.settings = get_settings()
         self._agent = None
-        # Load available libraries dynamically from repository service
-        repository_service = RepositoryService()
+        # Load available libraries dynamically from repository service (singleton)
+        # Import here to avoid circular import
+        from app.dependencies import get_repository_service
+        repository_service = get_repository_service()
         self.available_libraries = repository_service.get_available_packages()
         logger.info(f"Loaded {len(self.available_libraries)} available libraries for requirement extraction")
 
@@ -105,19 +106,22 @@ class RequirementExtractionAgent:
     def _get_agent_instructions(self) -> str:
         """Get system instructions for the requirement extraction agent."""
         return """
-You are a Requirement Extraction Agent for a chemistry computation tool generation system.
+You are an computational chemistry expert Agent for a chemistry computation tool generation system.
 
 ## Your Mission:
 
-Analyze the user's task description and break it down into individual tool requirements.
-Each tool should be a focused, single-purpose chemistry computation function.
+- You are given a task description from the user
+- you need to think about how you would solve the task step by step
+- You need to think what tools would be needed to assist you in solving the task
+- Each tool should be a focused, single-purpose python function that performs certain chemistry computation task
+- Make sure by reasoning and calling all the tools, you will be able to solve the task efficiently with minimal error
 
 ## Output Format:
 
 You MUST return a `RequirementList` object containing a list of `UserToolRequirement` objects.
 
 Each `UserToolRequirement` has:
-- `description`: What the tool does (1-2 sentences)
+- `description`: What the tool does, in less than 4 sentences
 - `input`: What data the tool takes as input
 - `output`: What data the tool produces as output
 
@@ -134,57 +138,13 @@ Each `UserToolRequirement` has:
 - Use chemistry-specific terminology
 
 **Chemistry Focus:**
-- Tools should use standard libraries: {", ".join(self.available_libraries)}
-- Focus on molecular properties, quantum chemistry, materials science
+- Tools should be achievable with python and help of common numerical and computational chemistry libraries.
+- You should explain what the tool produces in terms of chemistry, without going too much detail in programming. e.g. you should NOT specify which specific function in the specific library to use
 - Consider units (g/mol, eV, Angstroms, etc.)
 
 **Stateless Tools:**
 - A tool is a python function that's stateless, it can take either python objects or files as input, a file input passes 
 - A tool should be completely stateless. It shouldn't have any global state. However it can use randomness, provided that the seed is in input
-
-## Examples:
-
-### Input:
-"I need tools to calculate molecular properties from SMILES strings"
-
-### Output:
-```json
-{
-  "requirements": [
-    {
-      "description": "Calculate molecular weight from SMILES string",
-      "input": "SMILES string (e.g., 'CCO' for ethanol)",
-      "output": "Molecular weight in g/mol as float"
-    },
-    {
-      "description": "Count atoms in molecule from SMILES string",
-      "input": "SMILES string (e.g., 'CCO' for ethanol)",
-      "output": "Dictionary with atom types as keys and counts as values"
-    },
-    {
-      "description": "Calculate logP from SMILES string",
-      "input": "SMILES string (e.g., 'CCO' for ethanol)",
-      "output": "LogP value as float"
-    }
-  ]
-}
-```
-
-### Input:
-"Build a tool to optimize molecular geometry"
-
-### Output:
-```json
-{
-  "requirements": [
-    {
-      "description": "Optimize molecular geometry using force field method",
-      "input": "XYZ coordinates as string or SMILES string",
-      "output": "Optimized XYZ coordinates as string and final energy in eV"
-    }
-  ]
-}
-```
 
 ## Edge Cases:
 

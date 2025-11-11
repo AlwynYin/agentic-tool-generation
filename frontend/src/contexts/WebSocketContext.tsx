@@ -146,17 +146,17 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
 };
 
 // Custom hooks for specific message types
-export const useJobStatusUpdates = (jobId: string | null, onUpdate: (status: string, updatedAt: string) => void) => {
+export const useJobStatusUpdates = (jobId: string | null, onUpdate: (status: string, updatedAt: string, jobId?: string) => void) => {
   const { subscribe } = useWebSocket();
 
   useEffect(() => {
-    if (!jobId) return;
-
     const unsubscribe = subscribe((message: WSMessage) => {
       if (message.type === 'job-status-changed') {
         const data = (message as WSJobStatusChanged).data;
-        if (data.jobId === jobId) {
-          onUpdate(data.status, data.updatedAt);
+        // If jobId is null, listen to all jobs (for dashboard)
+        // Otherwise, only listen to specific job
+        if (!jobId || data.jobId === jobId) {
+          onUpdate(data.status, data.updatedAt, data.jobId);
         }
       }
     });
@@ -165,17 +165,17 @@ export const useJobStatusUpdates = (jobId: string | null, onUpdate: (status: str
   }, [jobId, subscribe, onUpdate]);
 };
 
-export const useJobProgressUpdates = (jobId: string | null, onUpdate: (progress: any) => void) => {
+export const useJobProgressUpdates = (jobId: string | null, onUpdate: (progress: any, jobId?: string) => void) => {
   const { subscribe } = useWebSocket();
 
   useEffect(() => {
-    if (!jobId) return;
-
     const unsubscribe = subscribe((message: WSMessage) => {
       if (message.type === 'job-progress-updated') {
         const data = (message as WSJobProgressUpdated).data;
-        if (data.jobId === jobId) {
-          onUpdate(data.progress);
+        // If jobId is null, listen to all jobs (for dashboard)
+        // Otherwise, only listen to specific job
+        if (!jobId || data.jobId === jobId) {
+          onUpdate(data.progress, data.jobId);
         }
       }
     });
