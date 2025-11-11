@@ -336,23 +336,19 @@ class TaskService:
                     job_id=task.job_id  # Short job_id like "job_abc123"
                 )
 
-                # Log summary
-                logger.info(f"Generation complete: {output.success_count} successful, {output.failure_count} failed")
-
-                # Store the result (either success OR failure)
-                if output.results:
-                    # Should be exactly 1 result
-                    await self._store_tool_spec(task_id, job_id, output.results[0])
-                elif output.failures:
-                    # Should be exactly 1 failure
-                    await self._store_generation_failure(task_id, job_id, output.failures[0])
+                # Handle result based on success/failure
+                if output.success:
+                    # Success: store tool and mark task as COMPLETED
+                    logger.info(f"Tool generation succeeded for task {task_id}")
+                    await self._store_tool_spec(task_id, job_id, output.result)
+                    await self._update_task_status(task_id, TaskStatus.COMPLETED)
+                    logger.info(f"Agent workflow completed successfully for task {task_id}")
                 else:
-                    # Neither success nor failure - this is an error
-                    raise ValueError("Pipeline returned neither success nor failure")
-
-                # Mark task as completed
-                await self._update_task_status(task_id, TaskStatus.COMPLETED)
-                logger.info(f"Agent workflow completed for task {task_id}")
+                    # Failure: store failure and mark task as FAILED
+                    logger.warning(f"Tool generation failed for task {task_id}: {output.failure.error}")
+                    await self._store_generation_failure(task_id, job_id, output.failure)
+                    await self._update_task_status(task_id, TaskStatus.FAILED)
+                    logger.info(f"Agent workflow completed with failure for task {task_id}")
 
             except asyncio.CancelledError:
                 logger.info(f"Workflow cancelled for task {task_id}")

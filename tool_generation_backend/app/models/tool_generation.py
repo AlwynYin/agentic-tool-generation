@@ -52,29 +52,20 @@ class ToolGenerationFailure(BaseModel):
 
 class ToolGenerationOutput(BaseModel):
     """
-    Output from tool generation pipeline.
-    Contains both successful results and failures.
+    Output from tool generation pipeline V2.
+    Represents the result of generating a SINGLE tool.
+
+    The v2 pipeline processes one tool at a time, so this model
+    is simplified to handle single-tool results rather than batches.
     """
-    results: List[ToolGenerationResult] = Field(
-        default_factory=list,
-        description="Successfully generated tools"
+    success: bool = Field(
+        description="Whether tool generation succeeded"
     )
-    failures: List[ToolGenerationFailure] = Field(
-        default_factory=list,
-        description="Failed tool generation attempts"
+    result: ToolGenerationResult | None = Field(
+        None,
+        description="Generated tool (only present if success=True)"
     )
-
-    @property
-    def total_count(self) -> int:
-        """Total number of tool generation attempts."""
-        return len(self.results) + len(self.failures)
-
-    @property
-    def success_count(self) -> int:
-        """Number of successful generations."""
-        return len(self.results)
-
-    @property
-    def failure_count(self) -> int:
-        """Number of failed generations."""
-        return len(self.failures)
+    failure: ToolGenerationFailure | None = Field(
+        None,
+        description="Failure details (only present if success=False)"
+    )
