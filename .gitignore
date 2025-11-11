@@ -31,10 +31,11 @@ node_modules
 *.env
 
 */README_*.md
-*-lock.yaml
+# *-lock.yaml  # Commented out - lock files should be committed for reproducible builds
 test*.sh
 #*.lock
 *.egg-info
+!pnpm-lock.yaml  # Explicitly include pnpm lock file
 
 # TypeScript compiled files
 # Ignore JS files in TypeScript source directories
