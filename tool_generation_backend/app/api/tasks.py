@@ -12,27 +12,12 @@ import logging
 from app.services.task_service import TaskService
 from app.models.task import Task, TaskStatus, TaskResponse
 from app.models.tool import Tool
-from app.repositories.task_repository import TaskRepository
-from app.repositories.tool_repository import ToolRepository
-from app.repositories.tool_failure_repository import ToolFailureRepository
 from app.config import get_settings
+from app.dependencies import get_task_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-# Dependency injection
-async def get_task_service() -> TaskService:
-    """Get task service instance."""
-    task_repo = TaskRepository()
-    tool_repo = ToolRepository()
-    tool_failure_repo = ToolFailureRepository()
-    return TaskService(
-        task_repo=task_repo,
-        tool_repo=tool_repo,
-        tool_failure_repo=tool_failure_repo
-    )
 
 
 @router.get("/{taskId}", response_model=TaskResponse)

@@ -30,11 +30,50 @@ class JobService:
     This service spawns multiple Tasks (one per tool) and tracks overall progress.
     """
 
-    def __init__(self):
-        self.job_repo = JobRepository()
-        self.task_repo = TaskRepository()
-        self.tool_repo = ToolRepository()
-        self.tool_failure_repo = ToolFailureRepository()
+    def __init__(
+        self,
+        job_repo: JobRepository,
+        task_repo: TaskRepository,
+        tool_repo: ToolRepository,
+        tool_failure_repo: ToolFailureRepository,
+        task_service: Optional[TaskService] = None,
+        websocket_manager: Optional[Any] = None
+    ):
+        """
+        Initialize JobService with repository dependencies.
+
+        Args:
+            job_repo: JobRepository instance
+            task_repo: TaskRepository instance
+            tool_repo: ToolRepository instance
+            tool_failure_repo: ToolFailureRepository instance
+            task_service: Optional TaskService instance (lazy-loaded if not provided)
+            websocket_manager: Optional WebSocket manager for real-time updates
+        """
+        self.job_repo = job_repo
+        self.task_repo = task_repo
+        self.tool_repo = tool_repo
+        self.tool_failure_repo = tool_failure_repo
+        self._task_service = task_service
+        self._websocket_manager = websocket_manager
+
+    @property
+    def task_service(self) -> TaskService:
+        """Lazy-load TaskService if not provided in constructor."""
+        if self._task_service is None:
+            # Import here to avoid circular imports at module level
+            from app.dependencies import get_task_service
+            self._task_service = get_task_service()
+        return self._task_service
+
+    @property
+    def websocket_manager(self) -> Optional[Any]:
+        """Lazy-load WebSocket manager if not provided in constructor."""
+        if self._websocket_manager is None:
+            # Import here to avoid circular imports at module level
+            from app.dependencies import get_websocket_manager_direct
+            self._websocket_manager = get_websocket_manager_direct()
+        return self._websocket_manager
 
     async def create_job(
         self,
@@ -78,6 +117,7 @@ class JobService:
 
             # Update job status to PROCESSING
             await self.job_repo.update_status(job_id, JobStatus.PROCESSING)
+            await self._broadcast_job_status(job_id, job_id_short, JobStatus.PROCESSING)
 
             # Spawn tasks for each tool requirement (asynchronously)
             # Don't await here - let tasks run in background
@@ -118,12 +158,8 @@ class JobService:
         try:
             logger.info(f"Spawning {len(tool_requirements)} tasks for job {job_id_short} (parallel mode)")
 
-            # Import TaskService here to avoid circular imports
-            task_service = TaskService(
-                task_repo=self.task_repo,
-                tool_repo=self.tool_repo,
-                tool_failure_repo=self.tool_failure_repo
-            )
+            # Use singleton TaskService instance
+            task_service = self.task_service
 
             # Create all tasks immediately - they will run in parallel
             # Concurrency is controlled by the semaphore in TaskService
@@ -152,6 +188,7 @@ class JobService:
         except Exception as e:
             logger.error(f"Error spawning tasks for job {job_id_short}: {e}")
             await self.job_repo.update_status(job_id, JobStatus.FAILED, error_message=str(e))
+            await self._broadcast_job_status(job_id, job_id_short, JobStatus.FAILED)
 
 
 
@@ -178,12 +215,8 @@ class JobService:
         try:
             logger.info(f"Spawning {len(tool_requirements)} tasks for job {job_id_short} (sequential mode)")
 
-            # Import TaskService here to avoid circular imports
-            task_service = TaskService(
-                task_repo=self.task_repo,
-                tool_repo=self.tool_repo,
-                tool_failure_repo=self.tool_failure_repo
-            )
+            # Use singleton TaskService instance
+            task_service = self.task_service
 
             # Create and process tasks sequentially (wait for each to complete before starting next)
             successful_tasks = 0
@@ -223,6 +256,7 @@ class JobService:
         except Exception as e:
             logger.error(f"Error spawning tasks for job {job_id_short}: {e}")
             await self.job_repo.update_status(job_id, JobStatus.FAILED, error_message=str(e))
+            await self._broadcast_job_status(job_id, job_id_short, JobStatus.FAILED)
 
     async def get_job_by_id(self, job_id: str) -> Optional[Job]:
         """
@@ -257,6 +291,12 @@ class JobService:
             job_id: Job ID (MongoDB _id)
         """
         await self.job_repo.increment_completed(job_id)
+
+        # Broadcast progress update
+        job = await self.job_repo.get_by_id(job_id)
+        if job:
+            await self._broadcast_job_progress(job_id, job.job_id)
+
         await self._check_job_completion(job_id)
 
     async def increment_failed(self, job_id: str):
@@ -268,6 +308,12 @@ class JobService:
             job_id: Job ID (MongoDB _id)
         """
         await self.job_repo.increment_failed(job_id)
+
+        # Broadcast progress update
+        job = await self.job_repo.get_by_id(job_id)
+        if job:
+            await self._broadcast_job_progress(job_id, job.job_id)
+
         await self._check_job_completion(job_id)
 
     async def increment_in_progress(self, job_id: str):
@@ -280,6 +326,11 @@ class JobService:
         """
         await self.job_repo.increment_in_progress(job_id)
 
+        # Broadcast progress update
+        job = await self.job_repo.get_by_id(job_id)
+        if job:
+            await self._broadcast_job_progress(job_id, job.job_id)
+
     async def decrement_in_progress(self, job_id: str):
         """
         Atomically decrement the tools_in_progress counter.
@@ -289,6 +340,11 @@ class JobService:
             job_id: Job ID (MongoDB _id)
         """
         await self.job_repo.decrement_in_progress(job_id)
+
+        # Broadcast progress update
+        job = await self.job_repo.get_by_id(job_id)
+        if job:
+            await self._broadcast_job_progress(job_id, job.job_id)
 
     async def _check_job_completion(self, job_id: str):
         """
@@ -307,6 +363,7 @@ class JobService:
             if job.is_complete:
                 logger.info(f"Job {job.job_id} is complete: {job.tools_completed} succeeded, {job.tools_failed} failed")
                 await self.job_repo.update_status(job_id, JobStatus.COMPLETED)
+                await self._broadcast_job_status(job_id, job.job_id, JobStatus.COMPLETED)
 
         except Exception as e:
             logger.error(f"Error checking job completion for {job_id}: {e}")
@@ -400,3 +457,55 @@ class JobService:
         except Exception as e:
             logger.error(f"Error getting failures for job {job_id}: {e}")
             return []
+
+    async def _broadcast_job_status(self, job_id: str, job_id_short: str, status: JobStatus):
+        """Broadcast job status change via WebSocket.
+
+        Args:
+            job_id: Job MongoDB _id
+            job_id_short: Short job identifier (e.g., job_abc123)
+            status: New job status
+        """
+        if self.websocket_manager:
+            try:
+                message = {
+                    "type": "job-status-changed",
+                    "data": {
+                        "jobId": job_id_short,
+                        "status": status.value if isinstance(status, JobStatus) else status,
+                        "updatedAt": datetime.now(timezone.utc).isoformat()
+                    }
+                }
+                await self.websocket_manager.send_to_job(job_id_short, message)
+                logger.debug(f"Broadcasted job status change for {job_id_short}: {status}")
+            except Exception as e:
+                logger.error(f"Failed to broadcast job status for {job_id_short}: {e}")
+
+    async def _broadcast_job_progress(self, job_id: str, job_id_short: str):
+        """Broadcast job progress update via WebSocket.
+
+        Args:
+            job_id: Job MongoDB _id
+            job_id_short: Short job identifier (e.g., job_abc123)
+        """
+        if self.websocket_manager:
+            try:
+                job = await self.job_repo.get_by_id(job_id)
+                if job:
+                    message = {
+                        "type": "job-progress-updated",
+                        "data": {
+                            "jobId": job_id_short,
+                            "progress": {
+                                "total": job.total_tools,
+                                "completed": job.tools_completed,
+                                "failed": job.tools_failed,
+                                "inProgress": job.tools_in_progress
+                            },
+                            "updatedAt": datetime.now(timezone.utc).isoformat()
+                        }
+                    }
+                    await self.websocket_manager.send_to_job(job_id_short, message)
+                    logger.debug(f"Broadcasted job progress for {job_id_short}")
+            except Exception as e:
+                logger.error(f"Failed to broadcast job progress for {job_id_short}: {e}")

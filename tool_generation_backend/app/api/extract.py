@@ -3,12 +3,13 @@ Simple API endpoint for requirement extraction + job submission.
 For testing purposes only - not production ready.
 """
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 from pydantic import BaseModel, Field
 import logging
 
 from app.agents.requirement_extraction_agent import RequirementExtractionAgent
 from app.services.job_service import JobService
+from app.dependencies import get_job_service
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,10 @@ class ExtractionResponse(BaseModel):
 
 
 @router.post("/extract-and-submit", response_model=ExtractionResponse)
-async def extract_and_submit(request: ExtractionRequest) -> ExtractionResponse:
+async def extract_and_submit(
+    request: ExtractionRequest,
+    job_service: JobService = Depends(get_job_service)
+) -> ExtractionResponse:
     """
     Extract tool requirements from description and submit job.
 
@@ -40,6 +44,7 @@ async def extract_and_submit(request: ExtractionRequest) -> ExtractionResponse:
 
     Args:
         request: Task description to extract requirements from
+        job_service: Job service instance
 
     Returns:
         ExtractionResponse with job ID and requirement count
@@ -60,7 +65,6 @@ async def extract_and_submit(request: ExtractionRequest) -> ExtractionResponse:
         logger.info(f"Extracted {len(requirements)} requirements")
 
         # Submit job with task description
-        job_service = JobService()
         job_id = await job_service.create_job(
             user_id=request.client_id,
             tool_requirements=requirements,

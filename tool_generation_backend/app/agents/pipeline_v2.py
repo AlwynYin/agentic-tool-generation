@@ -24,7 +24,6 @@ from app.agents.implementer_agent import ImplementerAgent
 from app.agents.test_agent import TestAgent
 from app.agents.reviewer_agent import ReviewerAgent
 from app.agents.summarizer_agent import SummarizerAgent
-from app.services.repository_service import RepositoryService
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +49,10 @@ class ToolGenerationPipelineV2:
         """Initialize the pipeline with all agents."""
         self.settings = get_settings()
 
-        # Load available packages from repository service
-        repository_service = RepositoryService()
+        # Load available packages from repository service (singleton)
+        # Import here to avoid circular import (dependencies -> task_service -> pipeline_v2 -> dependencies)
+        from app.dependencies import get_repository_service
+        repository_service = get_repository_service()
         available_packages = repository_service.get_available_packages()
         logger.info(f"Loaded {len(available_packages)} available packages: {available_packages}")
 

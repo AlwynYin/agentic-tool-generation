@@ -5,6 +5,7 @@ Loads and validates environment variables using Pydantic Settings.
 
 from functools import lru_cache
 from typing import List
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings

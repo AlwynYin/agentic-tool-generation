@@ -14,16 +14,11 @@ from app.services.job_service import JobService
 from app.models.job import *
 from app.models.tool import ToolStatus
 from app.config import get_settings
+from app.dependencies import get_job_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-# Dependency injection
-async def get_job_service() -> JobService:
-    """Get job service instance."""
-    return JobService()
 
 
 @router.get("", response_model=List[JobResponse])

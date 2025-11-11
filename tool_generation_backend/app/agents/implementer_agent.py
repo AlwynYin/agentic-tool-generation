@@ -276,7 +276,8 @@ Read and follow the specifications in these files:
 3. **Implement all validation rules** from the validation file
 4. **Use the API references** to call the correct library functions
 5. **Address previous feedback** if iteration history exists (this means you need to UPDATE the existing file, not create from scratch)
-6. Check tools/tool_schema.txt for format of the file and key requirements of the tool function
+6. **Check tools/tool_schema.txt** for format of the file and key requirements of the tool function
+7. **Note:** if the tool generates a plot, BE CAREFUL not to show the plot, instead save the figure into a file.
 
 ## Output
 

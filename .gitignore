@@ -47,3 +47,5 @@ tool_service/tools/*
 tool_service/repos/*
 tool_service/searches/*
 /tool_service/packages.json
+/tool_service/kpt.chk
+/tool_service/supcell.chk

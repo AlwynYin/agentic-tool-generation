@@ -39,7 +39,8 @@ class TaskService:
         task_repo: TaskRepository,
         tool_repo: ToolRepository,
         tool_failure_repo: Optional[ToolFailureRepository] = None,
-        websocket_manager: Optional[Any] = None
+        websocket_manager: Optional[Any] = None,
+        job_service: Optional[Any] = None  # Using Any to avoid circular import at type hint level
     ):
         """
         Initialize task service.
@@ -49,10 +50,13 @@ class TaskService:
             tool_repo: Tool repository for deduplication
             tool_failure_repo: Tool failure repository for storing failures
             websocket_manager: WebSocket manager for real-time updates
+            job_service: Optional JobService instance (lazy-loaded if not provided)
         """
         self.task_repo = task_repo
         self.tool_repo = tool_repo
         self.tool_failure_repo = tool_failure_repo or ToolFailureRepository()
+        self._job_service = job_service
+        self._websocket_manager = websocket_manager
 
         # Initialize settings
         self.settings = get_settings()
@@ -64,8 +68,25 @@ class TaskService:
 
         self.pipeline = ToolGenerationPipelineV2()
 
-        self.websocket_manager = websocket_manager
         self.active_workflows: Dict[str, asyncio.Task] = {}
+
+    @property
+    def job_service(self) -> Any:
+        """Lazy-load JobService if not provided in constructor."""
+        if self._job_service is None:
+            # Import here to avoid circular imports at module level
+            from app.dependencies import get_job_service
+            self._job_service = get_job_service()
+        return self._job_service
+
+    @property
+    def websocket_manager(self) -> Optional[Any]:
+        """Lazy-load WebSocket manager if not provided in constructor."""
+        if self._websocket_manager is None:
+            # Import here to avoid circular imports at module level
+            from app.dependencies import get_websocket_manager_direct
+            self._websocket_manager = get_websocket_manager_direct()
+        return self._websocket_manager
 
     async def create_task(
         self,
@@ -109,9 +130,7 @@ class TaskService:
             logger.info(f"Created task {task_id_str} (DB ID: {task_db_id}) for job {job_id_short}")
 
             # Notify job that task started
-            from app.services.job_service import JobService
-            job_service = JobService()
-            await job_service.increment_in_progress(job_id)
+            await self.job_service.increment_in_progress(job_id)
 
             # Start async workflow processing
             workflow_task = asyncio.create_task(
@@ -339,10 +358,8 @@ class TaskService:
                 logger.info(f"Workflow cancelled for task {task_id}")
                 await self._update_task_status(task_id, TaskStatus.FAILED, "Workflow cancelled")
                 # Notify job that tool failed
-                from app.services.job_service import JobService
-                job_service = JobService()
-                await job_service.decrement_in_progress(job_id)
-                await job_service.increment_failed(job_id)
+                await self.job_service.decrement_in_progress(job_id)
+                await self.job_service.increment_failed(job_id)
 
             except Exception as e:
                 error_msg = f"Workflow failed: {str(e)}"
@@ -358,10 +375,8 @@ class TaskService:
                 })
 
                 # Notify job that tool failed
-                from app.services.job_service import JobService
-                job_service = JobService()
-                await job_service.decrement_in_progress(job_id)
-                await job_service.increment_failed(job_id)
+                await self.job_service.decrement_in_progress(job_id)
+                await self.job_service.increment_failed(job_id)
 
             finally:
                 # Clean up workflow tracking
@@ -419,10 +434,8 @@ class TaskService:
             })
 
             # Notify job that tool completed
-            from app.services.job_service import JobService
-            job_service = JobService()
-            await job_service.decrement_in_progress(job_id)
-            await job_service.increment_completed(job_id)
+            await self.job_service.decrement_in_progress(job_id)
+            await self.job_service.increment_completed(job_id)
 
         except Exception as e:
             logger.error(f"Error storing tool spec for task {task_id}: {e}")
@@ -466,10 +479,8 @@ class TaskService:
             })
 
             # Notify job that tool failed
-            from app.services.job_service import JobService
-            job_service = JobService()
-            await job_service.decrement_in_progress(job_id)
-            await job_service.increment_failed(job_id)
+            await self.job_service.decrement_in_progress(job_id)
+            await self.job_service.increment_failed(job_id)
 
         except Exception as e:
             logger.error(f"Error storing generation failure for task {task_id}: {e}")
@@ -490,9 +501,27 @@ class TaskService:
         """Send WebSocket notification for task update."""
         if self.websocket_manager:
             try:
-                await self.websocket_manager.send_to_task(task_id, message)
+                # Get task to retrieve job_id
+                task = await self.task_repo.get_by_id(task_id)
+                if task:
+                    # Format message according to frontend expectations
+                    ws_message = {
+                        "type": "task-status-changed",
+                        "data": {
+                            "taskId": task.task_id,
+                            "jobId": task.job_id,
+                            "status": message.get("status", str(task.status)),
+                            "updatedAt": message.get("timestamp", datetime.now(timezone.utc).isoformat())
+                        }
+                    }
+                    # Add any additional data from the original message
+                    if "error" in message:
+                        ws_message["data"]["error"] = message["error"]
+
+                    await self.websocket_manager.send_to_task(task.task_id, task.job_id, ws_message)
+                    logger.debug(f"Sent WebSocket notification for task {task_id}")
             except Exception as e:
-                logger.error(f"Failed to send WebSocket notification: {e}")
+                logger.error(f"Failed to send WebSocket notification for task {task_id}: {e}")
 
     async def _notify_agent_progress(self, task_id: str, progress: Dict[str, Any]):
         """Notify OpenAI agent progress via WebSocket."""

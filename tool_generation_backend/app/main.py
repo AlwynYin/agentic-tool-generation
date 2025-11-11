@@ -7,9 +7,11 @@ from contextlib import asynccontextmanager
 import logging
 import subprocess
 from typing import Dict, Any
+from pathlib import Path
 
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.database import init_database
@@ -21,7 +23,7 @@ from app.api.extract import router as extract_router
 from app.websocket.manager import WebSocketManager
 from app.middleware.logging import setup_logging_middleware
 from app.utils.llm_backend import authenticate_llm
-from app.services.repository_service import RepositoryService
+from app.dependencies import get_repository_service, set_websocket_manager
 
 
 @asynccontextmanager
@@ -47,11 +49,13 @@ async def lifespan(app: FastAPI):
         logging.info(f"✅ {settings.llm_backend.upper()} authenticated successfully")
 
     # Initialize WebSocket manager
-    app.state.websocket_manager = WebSocketManager()
+    websocket_manager = WebSocketManager()
+    app.state.websocket_manager = websocket_manager
+    set_websocket_manager(websocket_manager)  # Make available for dependency injection
     logging.info("🔌 WebSocket manager initialized")
 
-    # Check repository status and warn about missing navigation guides
-    repo_service = RepositoryService()
+    # Check repository status and warn about missing navigation guides (singleton)
+    repo_service = get_repository_service()
     repo_service.load_package_config()
     missing_guides = repo_service.check_missing_guides()
 
@@ -106,23 +110,48 @@ app.include_router(repositories_router, prefix="/api/v1/repositories", tags=["re
 app.include_router(extract_router, prefix="/api/v1", tags=["extract"])
 
 
-@app.get("/")
-async def root() -> Dict[str, Any]:
-    """Root endpoint with basic service information."""
-    return {
-        "service": "agent-browser-backend",
-        "version": "2.0.0",
-        "status": "running",
-        "docs": "/docs",
-        "websocket": "/ws/{session_id}",
-    }
-
-
 @app.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
     """WebSocket endpoint for real-time session updates."""
     websocket_manager = app.state.websocket_manager
     await websocket_manager.connect(websocket, session_id)
+
+
+# Serve frontend static files (must be after API routes)
+# Check if frontend build directory exists
+frontend_dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
+if frontend_dist.exists():
+    logging.info(f"📦 Serving frontend from {frontend_dist}")
+
+    # Mount static files for assets (js, css, etc)
+    app.mount("/assets", StaticFiles(directory=frontend_dist / "assets"), name="assets")
+
+    # Catch-all route for SPA - must be last
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        """Serve frontend for all non-API routes (SPA routing)."""
+        from fastapi.responses import FileResponse
+
+        # Check if file exists in dist
+        file_path = frontend_dist / full_path
+        if file_path.is_file():
+            return FileResponse(file_path)
+
+        # Otherwise serve index.html (SPA routing)
+        return FileResponse(frontend_dist / "index.html")
+else:
+    logging.warning("⚠️  Frontend build directory not found - API only mode")
+
+    @app.get("/")
+    async def root() -> Dict[str, Any]:
+        """Root endpoint with basic service information."""
+        return {
+            "service": "agent-browser-backend",
+            "version": "2.0.0",
+            "status": "running",
+            "docs": "/docs",
+            "websocket": "/ws/{session_id}",
+        }
 
 
 if __name__ == "__main__":
