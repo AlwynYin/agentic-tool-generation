@@ -31,6 +31,7 @@ RUN apt-get update && apt-get install -y \
     git \
     ripgrep \
     nano \
+    vim \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js for Codex CLI
@@ -47,14 +48,14 @@ RUN which rg && rg --version && which codex && codex --version
 # Install uv for Python package management
 RUN pip install uv
 
-# Copy backend dependency files
-COPY tool_generation_backend/pyproject.toml tool_generation_backend/uv.lock ./tool_generation_backend/
+# Copy backend dependency files from project root
+COPY pyproject.toml uv.lock ./
 
-# Install Python dependencies
-WORKDIR /app/tool_generation_backend
+# Install Python dependencies in project root first
 RUN uv sync --frozen
 
 # Copy backend application code
+WORKDIR /app/tool_generation_backend
 COPY tool_generation_backend/ ./
 
 # Copy frontend build from stage 1
