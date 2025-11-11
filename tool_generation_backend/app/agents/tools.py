@@ -16,13 +16,14 @@ from app.utils.codex_utils import (
     execute_codex_implement,
     execute_codex_browse
 )
-from app.models.session import ToolRequirement, ImplementationPlan
+from app.models.task import ToolRequirement, ImplementationPlan
 from app.models.tool_generation import ToolGenerationResult
 
 logger = logging.getLogger(__name__)
 
-# Context variable for passing job_id through the agent execution
-# This is set by the pipeline before running the agent
+# Context variables for passing task_id and job_id through the agent execution
+# These are set by the pipeline before running the agent
+_task_id_context: ContextVar[Optional[str]] = ContextVar('task_id', default=None)
 _job_id_context: ContextVar[Optional[str]] = ContextVar('job_id', default=None)
 
 
@@ -50,13 +51,18 @@ async def implement_tool(requirement: ToolRequirement, api_refs: Optional[List[s
         logger.debug(f"Received input: {requirement}")
         logger.debug(f"API references: {api_refs}")
 
-        # Get job_id from context (set by pipeline)
+        # Get task_id and job_id from context (set by pipeline)
+        task_id = _task_id_context.get()
         job_id = _job_id_context.get()
+
+        if not task_id:
+            raise ValueError("task_id not found in context. Pipeline must set task_id before running agent.")
         if not job_id:
             raise ValueError("job_id not found in context. Pipeline must set job_id before running agent.")
 
         # Create implementation plan
         plan = ImplementationPlan(
+            task_id=task_id,
             job_id=job_id,
             requirement=requirement,
             api_refs=api_refs or []
@@ -102,7 +108,8 @@ async def browse_documentation(library: str, query: str) -> str:
         logger.info(f"Browsing {library} documentation for: {query}")
 
         # Use existing codex browse functionality
-        result = await execute_codex_browse(library, query)
+        # Wrap single query in a list for the updated API
+        result = await execute_codex_browse(library, [query])
 
         logger.info(f"Successfully browsed {library} documentation")
 

@@ -21,6 +21,7 @@ from app.models.repository import (
     PackageConfig
 )
 from app.services.repository_service import RepositoryService
+from app.dependencies import get_repository_service
 
 logger = logging.getLogger(__name__)
 
@@ -32,11 +33,6 @@ class PackageConfigUpload(BaseModel):
     config: Dict[str, Dict[str, Any]] = Field(
         description="Package configuration as a dictionary"
     )
-
-
-def get_repository_service() -> RepositoryService:
-    """Dependency to get repository service instance."""
-    return RepositoryService()
 
 
 @router.post("/upload-config", response_model=Dict[str, Any])

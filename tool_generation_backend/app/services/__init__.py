@@ -1,9 +1,7 @@
 """Service layer for business logic."""
 
-from .session_service import SessionService
-from .tool_service import ToolService
+from .task_service import TaskService
 
 __all__ = [
-    "SessionService",
-    "ToolService"
+    "TaskService",
 ]

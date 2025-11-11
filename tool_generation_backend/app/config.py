@@ -5,6 +5,7 @@ Loads and validates environment variables using Pydantic Settings.
 
 from functools import lru_cache
 from typing import List
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings
@@ -27,6 +28,18 @@ class Settings(BaseSettings):
     )
 
     # AI Services
+    llm_backend: str = Field(
+        default="codex",
+        env="LLM_BACKEND",
+        description="LLM backend to use: 'codex' or 'claude'"
+    )
+
+    llm_timeout: int = Field(
+        default=600,
+        env="LLM_TIMEOUT",
+        description="timeout for LLM backend in seconds"
+    )
+
     openai_api_key: str = Field(
         ...,
         env="OPENAI_API_KEY",
@@ -36,6 +49,11 @@ class Settings(BaseSettings):
         default="gpt-5",
         env="OPENAI_MODEL",
         description="OpenAI model to use"
+    )
+    anthropic_api_key: str = Field(
+        default="",
+        env="ANTHROPIC_API_KEY",
+        description="Anthropic API key for Claude Code (optional, uses claude login if not provided)"
     )
 
     # Server Configuration
@@ -99,6 +117,49 @@ class Settings(BaseSettings):
         description="Directory for search results (relative to tool_service_dir)"
     )
 
+    # Pipeline V2 Configuration
+    pipeline_version: str = Field(
+        default="v2",
+        env="PIPELINE_VERSION",
+        description="Pipeline version to use: v1 or v2"
+    )
+
+    max_refinement_iterations: int = Field(
+        default=3,
+        env="MAX_REFINEMENT_ITERATIONS",
+        description="Maximum iterations for tool refinement in V2 pipeline"
+    )
+
+    enable_property_tests: bool = Field(
+        default=False,
+        env="ENABLE_PROPERTY_TESTS",
+        description="Generate property-based tests in V2 pipeline"
+    )
+
+    enable_golden_tests: bool = Field(
+        default=True,
+        env="ENABLE_GOLDEN_TESTS",
+        description="Generate golden output tests in V2 pipeline"
+    )
+
+    pytest_timeout: int = Field(
+        default=60,
+        env="PYTEST_TIMEOUT",
+        description="Timeout for pytest execution in seconds"
+    )
+
+    max_concurrent_tools: int = Field(
+        default=6,
+        env="MAX_CONCURRENT_TOOLS",
+        description="Maximum number of tools to generate concurrently"
+    )
+
+    task_execution_mode: str = Field(
+        default="parallel",
+        env="TASK_EXECUTION_MODE",
+        description="Task execution mode: 'sequential' (one at a time) or 'parallel' (multiple concurrent, limited by max_concurrent_tools)"
+    )
+
     @property
     def tools_service_path(self) -> str:
         """Get the full tools directory path."""
@@ -128,8 +189,23 @@ class Settings(BaseSettings):
         """Validate required configuration settings."""
         errors = []
 
-        if not self.openai_api_key:
-            errors.append("OPENAI_API_KEY environment variable is required")
+        # Validate LLM backend selection
+        valid_backends = {"codex", "claude"}
+        if self.llm_backend not in valid_backends:
+            errors.append(
+                f"LLM_BACKEND must be one of {valid_backends}, "
+                f"got: {self.llm_backend}"
+            )
+
+        # Validate backend-specific API keys
+        if self.llm_backend == "codex" and not self.openai_api_key:
+            errors.append("OPENAI_API_KEY environment variable is required when using Codex backend")
+
+        if self.llm_backend == "claude" and not self.claude_api_key:
+            errors.append("CLAUSE_API_KEY environment variable is required when using CLADE backend")
+
+        if self.llm_timeout < 100:
+            errors.append("LLM_TIMEOUT is too short")
 
         if not self.mongodb_url:
             errors.append("MONGODB_URL environment variable is required")
@@ -147,6 +223,14 @@ class Settings(BaseSettings):
             errors.append(
                 f"LOG_LEVEL must be one of {valid_log_levels}, "
                 f"got: {self.log_level}"
+            )
+
+        # Validate task execution mode
+        valid_execution_modes = {"sequential", "parallel"}
+        if self.task_execution_mode not in valid_execution_modes:
+            errors.append(
+                f"TASK_EXECUTION_MODE must be one of {valid_execution_modes}, "
+                f"got: {self.task_execution_mode}"
             )
 
         if errors:

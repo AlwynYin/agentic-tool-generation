@@ -68,6 +68,9 @@ class RepositoryService:
             configs = {}
             for package_name, package_data in raw_config.items():
                 try:
+                    # Auto-populate package_name from dict key if not provided
+                    if 'package_name' not in package_data or package_data['package_name'] is None:
+                        package_data['package_name'] = package_name
                     # Pydantic will auto-populate missing fields with defaults
                     config = PackageConfig(**package_data)
                     configs[package_name] = config
@@ -111,6 +114,9 @@ class RepositoryService:
             validated_configs = {}
             for package_name, package_data in raw_config.items():
                 try:
+                    # Auto-populate package_name from dict key if not provided
+                    if 'package_name' not in package_data or package_data['package_name'] is None:
+                        package_data['package_name'] = package_name
                     # Pydantic will validate and auto-populate missing fields
                     config = PackageConfig(**package_data)
                     # Convert back to dict for JSON serialization
@@ -144,6 +150,18 @@ class RepositoryService:
         except Exception as e:
             logger.error(f"Error saving package config: {e}")
             raise
+
+    def get_available_packages(self) -> List[str]:
+        """
+        Get list of available package names from configuration.
+
+        Returns:
+            List of package names
+        """
+        if not self.configs:
+            self.load_package_config()
+
+        return list(self.configs.keys())
 
     def check_missing_guides(self) -> List[str]:
         """

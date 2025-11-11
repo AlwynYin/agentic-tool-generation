@@ -173,6 +173,47 @@ class WebSocketManager:
         if connections:
             logger.debug(f"Sent global message to {len(connections)} connections")
 
+    async def send_to_job(self, job_id: str, message: Dict[str, Any]):
+        """
+        Send job-related message to all connected clients.
+
+        For now, broadcasts to all connections. Future enhancement could
+        support job-specific subscriptions.
+
+        Args:
+            job_id: Job ID
+            message: Message to send (will have jobId added if not present)
+        """
+        # Ensure jobId is in message for proper frontend routing
+        if "jobId" not in message:
+            message["jobId"] = job_id
+
+        # Broadcast to all for now (frontend will filter by jobId)
+        await self.send_to_all(message)
+        logger.debug(f"Broadcasted job message for {job_id}")
+
+    async def send_to_task(self, task_id: str, job_id: str, message: Dict[str, Any]):
+        """
+        Send task-related message to all connected clients.
+
+        For now, broadcasts to all connections. Future enhancement could
+        support task-specific subscriptions.
+
+        Args:
+            task_id: Task ID
+            job_id: Job ID (for frontend routing)
+            message: Message to send (will have taskId/jobId added if not present)
+        """
+        # Ensure taskId and jobId are in message for proper frontend routing
+        if "taskId" not in message:
+            message["taskId"] = task_id
+        if "jobId" not in message:
+            message["jobId"] = job_id
+
+        # Broadcast to all for now (frontend will filter by taskId/jobId)
+        await self.send_to_all(message)
+        logger.debug(f"Broadcasted task message for task {task_id} in job {job_id}")
+
     async def _send_to_websocket(self, websocket: WebSocket, message: Dict[str, Any]):
         """
         Send message to a specific WebSocket connection.

@@ -1,0 +1,18 @@
+# Railway deployment configuration
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+watchPatterns = [
+  "frontend/**",
+  "tool_generation_backend/**",
+  "Dockerfile"
+]
+
+[deploy]
+# Note: startCommand is optional - CMD in Dockerfile will be used if not specified
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+# Railway will inject environment variables at runtime
+# No .env file needed - configure all variables in Railway dashboard

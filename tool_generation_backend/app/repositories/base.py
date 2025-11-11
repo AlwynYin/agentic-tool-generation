@@ -257,6 +257,13 @@ class BaseRepository(ABC, Generic[T]):
         if "tool_failure_ids" in document and document["tool_failure_ids"]:
             document["tool_failure_ids"] = [str(oid) for oid in document["tool_failure_ids"]]
 
+        # Convert singular ObjectId fields to strings (e.g., tool_id, tool_failure_id in Task model)
+        if "tool_id" in document and document["tool_id"]:
+            document["tool_id"] = str(document["tool_id"])
+
+        if "tool_failure_id" in document and document["tool_failure_id"]:
+            document["tool_failure_id"] = str(document["tool_failure_id"])
+
         # Create model instance
         return self.model_class(**document)
 

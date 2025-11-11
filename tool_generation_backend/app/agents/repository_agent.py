@@ -70,7 +70,7 @@ class RepositoryRegistrationAgent:
         self._ensure_agent()
 
         try:
-            package_name = package_config.pip_name
+            package_name = package_config.package_name
             logger.info(f"Starting repository registration for package: {package_name}")
 
             # Build message for the agent
@@ -91,11 +91,11 @@ class RepositoryRegistrationAgent:
             return output
 
         except Exception as e:
-            logger.error(f"Error in repository registration for {package_config.pip_name}: {e}")
+            logger.error(f"Error in repository registration for {package_config.package_name}: {e}")
             # Return failure output
             return RepositoryRegistrationOutput(
                 success=False,
-                package_name=package_config.pip_name,
+                package_name=package_config.package_name,
                 repo_type="unknown",
                 guide_generated=False,
                 error=str(e)
@@ -113,7 +113,7 @@ class RepositoryRegistrationAgent:
         """
         message = f"""Register the following chemistry library package:
 
-Package Name: {config.pip_name}
+Package Name: {config.package_name}
 Description: {config.description}
 """
 
@@ -141,7 +141,7 @@ Description: {config.description}
     def _get_agent_instructions(self) -> str:
         """Get system instructions for the repository registration agent."""
         return """
-You are a Repository Registration Agent specialized in setting up library documentation.
+You are a Repository Documentation Agent specialized in setting up library documentation.
 
 ## Library:
 - Your mission is to download and register libraries so that it's easy to search for documentation or code (if available) when using the packages. 
@@ -160,9 +160,10 @@ Register a chemistry library package by:
 ## Workflow:
 
 ### Step 1: Find Repository Information
-- Use web search tool to find:
+- YOU MUST Use web search tool to find:
     - Official repository URL (GitHub, GitLab, etc.)
     - Git clone URL (e.g., https://github.com/rdkit/rdkit.git)
+    - Specific branch / tag to clone
     - Whether docs are in the repo or hosted externally
     - External documentation URL if applicable
 

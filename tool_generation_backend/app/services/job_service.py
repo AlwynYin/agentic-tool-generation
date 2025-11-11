@@ -1,0 +1,511 @@
+"""
+Job service for managing bulk tool generation workflows.
+Orchestrates multiple task spawns and tracks overall job progress.
+"""
+
+import logging
+import uuid
+import asyncio
+from typing import List, Dict, Any, Optional
+from datetime import datetime, timezone
+
+from app.config import get_settings
+from app.models.job import Job, JobStatus
+from app.models.task import TaskStatus
+from app.models.specs import UserToolRequirement
+from app.repositories.job_repository import JobRepository
+from app.repositories.task_repository import TaskRepository
+from app.repositories.tool_repository import ToolRepository
+from app.repositories.tool_failure_repository import ToolFailureRepository
+from app.services.task_service import TaskService
+
+logger = logging.getLogger(__name__)
+
+
+class JobService:
+    """
+    Service for managing jobs (bulk tool generation workflows).
+
+    A Job represents a user request to generate multiple tools.
+    This service spawns multiple Tasks (one per tool) and tracks overall progress.
+    """
+
+    def __init__(
+        self,
+        job_repo: JobRepository,
+        task_repo: TaskRepository,
+        tool_repo: ToolRepository,
+        tool_failure_repo: ToolFailureRepository,
+        task_service: Optional[TaskService] = None,
+        websocket_manager: Optional[Any] = None
+    ):
+        """
+        Initialize JobService with repository dependencies.
+
+        Args:
+            job_repo: JobRepository instance
+            task_repo: TaskRepository instance
+            tool_repo: ToolRepository instance
+            tool_failure_repo: ToolFailureRepository instance
+            task_service: Optional TaskService instance (lazy-loaded if not provided)
+            websocket_manager: Optional WebSocket manager for real-time updates
+        """
+        self.job_repo = job_repo
+        self.task_repo = task_repo
+        self.tool_repo = tool_repo
+        self.tool_failure_repo = tool_failure_repo
+        self._task_service = task_service
+        self._websocket_manager = websocket_manager
+
+    @property
+    def task_service(self) -> TaskService:
+        """Lazy-load TaskService if not provided in constructor."""
+        if self._task_service is None:
+            # Import here to avoid circular imports at module level
+            from app.dependencies import get_task_service
+            self._task_service = get_task_service()
+        return self._task_service
+
+    @property
+    def websocket_manager(self) -> Optional[Any]:
+        """Lazy-load WebSocket manager if not provided in constructor."""
+        if self._websocket_manager is None:
+            # Import here to avoid circular imports at module level
+            from app.dependencies import get_websocket_manager_direct
+            self._websocket_manager = get_websocket_manager_direct()
+        return self._websocket_manager
+
+    async def create_job(
+        self,
+        user_id: str,
+        tool_requirements: List[UserToolRequirement],
+        task_description: Optional[str] = None
+    ) -> str:
+        """
+        Create a new job and spawn tasks for each tool requirement.
+
+        Args:
+            user_id: User identifier
+            tool_requirements: List of tool requirements to generate
+            task_description: Optional natural language description of the task
+
+        Returns:
+            str: Job ID (MongoDB _id)
+        """
+        try:
+            # Generate short job_id (e.g., job_abc123)
+            job_id_short = f"job_{uuid.uuid4().hex[:8]}"
+
+            # Create job document
+            job_data = {
+                "job_id": job_id_short,
+                "user_id": user_id,
+                "operation_type": "generate",
+                "tool_requirements": [req.model_dump() for req in tool_requirements],
+                "task_description": task_description,
+                "status": JobStatus.PENDING.value,
+                "task_ids": [],
+                "tools_completed": 0,
+                "tools_failed": 0,
+                "tools_in_progress": 0,
+                "created_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(timezone.utc)
+            }
+
+            job_id = await self.job_repo.create_job(job_data)
+            logger.info(f"Created job {job_id_short} (DB ID: {job_id}) with {len(tool_requirements)} tool requirements")
+
+            # Update job status to PROCESSING
+            await self.job_repo.update_status(job_id, JobStatus.PROCESSING)
+            await self._broadcast_job_status(job_id, job_id_short, JobStatus.PROCESSING)
+
+            # Spawn tasks for each tool requirement (asynchronously)
+            # Don't await here - let tasks run in background
+            # Route to appropriate method based on configuration
+            settings = get_settings()
+            if settings.task_execution_mode == "parallel":
+                logger.info(f"Using parallel task execution mode for job {job_id_short}")
+                asyncio.create_task(self._spawn_tasks_parallel(job_id, job_id_short, user_id, tool_requirements))
+            else:
+                logger.info(f"Using sequential task execution mode for job {job_id_short}")
+                asyncio.create_task(self._spawn_tasks_sequential(job_id, job_id_short, user_id, tool_requirements))
+
+            return job_id
+
+        except Exception as e:
+            logger.error(f"Error creating job: {e}")
+            raise
+
+    async def _spawn_tasks_parallel(
+        self,
+        job_id: str,
+        job_id_short: str,
+        user_id: str,
+        tool_requirements: List[UserToolRequirement]
+    ):
+        """
+        Spawn multiple tasks (one per tool requirement) that run in parallel.
+
+        Tasks are created immediately and run concurrently, limited by the
+        concurrency semaphore in TaskService (max_concurrent_tools setting).
+
+        Args:
+            job_id: Job ID (MongoDB _id)
+            job_id_short: Short job identifier (e.g., job_abc123)
+            user_id: User identifier
+            tool_requirements: List of tool requirements
+        """
+        try:
+            logger.info(f"Spawning {len(tool_requirements)} tasks for job {job_id_short} (parallel mode)")
+
+            # Use singleton TaskService instance
+            task_service = self.task_service
+
+            # Create all tasks immediately - they will run in parallel
+            # Concurrency is controlled by the semaphore in TaskService
+            for idx, req in enumerate(tool_requirements, 1):
+                try:
+                    logger.info(f"Creating task {idx}/{len(tool_requirements)} for job {job_id_short}: {req.description}")
+
+                    # Create task and start its workflow (non-blocking)
+                    task_id = await task_service.create_task(
+                        job_id=job_id,
+                        job_id_short=job_id_short,
+                        user_id=user_id,
+                        requirement=req
+                    )
+                    await self.job_repo.add_task_id(job_id, task_id)
+
+                    logger.info(f"Task {idx}/{len(tool_requirements)} created: {task_id}")
+
+                except Exception as task_error:
+                    logger.error(f"Failed to create task {idx}/{len(tool_requirements)} for job {job_id_short}: {task_error}")
+                    # Increment failed counter since we couldn't even create the task
+                    await self.job_repo.increment_failed(job_id)
+
+            logger.info(f"All {len(tool_requirements)} tasks created for job {job_id_short}. They are now running in parallel.")
+
+        except Exception as e:
+            logger.error(f"Error spawning tasks for job {job_id_short}: {e}")
+            await self.job_repo.update_status(job_id, JobStatus.FAILED, error_message=str(e))
+            await self._broadcast_job_status(job_id, job_id_short, JobStatus.FAILED)
+
+
+
+    async def _spawn_tasks_sequential(
+        self,
+        job_id: str,
+        job_id_short: str,
+        user_id: str,
+        tool_requirements: List[UserToolRequirement]
+    ):
+        """
+        Spawn multiple tasks (one per tool requirement) that run sequentially.
+
+        Each task must reach a terminal state (COMPLETED or FAILED) before
+        the next task is created. This ensures predictable execution order
+        but is slower than parallel mode.
+
+        Args:
+            job_id: Job ID (MongoDB _id)
+            job_id_short: Short job identifier (e.g., job_abc123)
+            user_id: User identifier
+            tool_requirements: List of tool requirements
+        """
+        try:
+            logger.info(f"Spawning {len(tool_requirements)} tasks for job {job_id_short} (sequential mode)")
+
+            # Use singleton TaskService instance
+            task_service = self.task_service
+
+            # Create and process tasks sequentially (wait for each to complete before starting next)
+            successful_tasks = 0
+            failed_tasks = 0
+            for idx, req in enumerate(tool_requirements, 1):
+                try:
+                    logger.info(f"Starting task {idx}/{len(tool_requirements)} for job {job_id_short}: {req.description}")
+
+                    # Create task and start its workflow
+                    task_id = await task_service.create_task(
+                        job_id=job_id,
+                        job_id_short=job_id_short,
+                        user_id=user_id,
+                        requirement=req
+                    )
+                    await self.job_repo.add_task_id(job_id, task_id)
+
+                    # Wait for task to reach terminal state (COMPLETED or FAILED)
+                    completed_task = await task_service.wait_for_task_completion(task_id)
+
+                    # Handle both enum and string status values
+                    status_value = completed_task.status.value if isinstance(completed_task.status, TaskStatus) else completed_task.status
+
+                    if status_value == TaskStatus.COMPLETED:
+                        successful_tasks += 1
+                        logger.info(f"Task {idx}/{len(tool_requirements)} completed successfully for job {job_id_short}")
+                    else:
+                        failed_tasks += 1
+                        logger.warning(f"Task {idx}/{len(tool_requirements)} failed for job {job_id_short}: status={status_value}")
+
+                except Exception as task_error:
+                    logger.error(f"Failed to process task {idx}/{len(tool_requirements)} for job {job_id_short}: {task_error}")
+                    failed_tasks += 1
+
+            logger.info(f"All tasks completed for job {job_id_short}: {successful_tasks} succeeded, {failed_tasks} failed")
+
+        except Exception as e:
+            logger.error(f"Error spawning tasks for job {job_id_short}: {e}")
+            await self.job_repo.update_status(job_id, JobStatus.FAILED, error_message=str(e))
+            await self._broadcast_job_status(job_id, job_id_short, JobStatus.FAILED)
+
+    async def get_job_by_id(self, job_id: str) -> Optional[Job]:
+        """
+        Get job by MongoDB _id.
+
+        Args:
+            job_id: Job ID (MongoDB _id)
+
+        Returns:
+            Optional[Job]: Job if found
+        """
+        return await self.job_repo.get_by_id(job_id)
+
+    async def get_job_by_job_id(self, job_id_short: str) -> Optional[Job]:
+        """
+        Get job by short job_id field.
+
+        Args:
+            job_id_short: Short job identifier (e.g., job_abc123)
+
+        Returns:
+            Optional[Job]: Job if found
+        """
+        return await self.job_repo.get_by_job_id(job_id_short)
+
+    async def increment_completed(self, job_id: str):
+        """
+        Atomically increment the tools_completed counter.
+        Called by TaskService when a tool is successfully generated.
+
+        Args:
+            job_id: Job ID (MongoDB _id)
+        """
+        await self.job_repo.increment_completed(job_id)
+
+        # Broadcast progress update
+        job = await self.job_repo.get_by_id(job_id)
+        if job:
+            await self._broadcast_job_progress(job_id, job.job_id)
+
+        await self._check_job_completion(job_id)
+
+    async def increment_failed(self, job_id: str):
+        """
+        Atomically increment the tools_failed counter.
+        Called by TaskService when a tool generation fails.
+
+        Args:
+            job_id: Job ID (MongoDB _id)
+        """
+        await self.job_repo.increment_failed(job_id)
+
+        # Broadcast progress update
+        job = await self.job_repo.get_by_id(job_id)
+        if job:
+            await self._broadcast_job_progress(job_id, job.job_id)
+
+        await self._check_job_completion(job_id)
+
+    async def increment_in_progress(self, job_id: str):
+        """
+        Atomically increment the tools_in_progress counter.
+        Called by TaskService when a task starts processing.
+
+        Args:
+            job_id: Job ID (MongoDB _id)
+        """
+        await self.job_repo.increment_in_progress(job_id)
+
+        # Broadcast progress update
+        job = await self.job_repo.get_by_id(job_id)
+        if job:
+            await self._broadcast_job_progress(job_id, job.job_id)
+
+    async def decrement_in_progress(self, job_id: str):
+        """
+        Atomically decrement the tools_in_progress counter.
+        Called by TaskService when a task completes (success or failure).
+
+        Args:
+            job_id: Job ID (MongoDB _id)
+        """
+        await self.job_repo.decrement_in_progress(job_id)
+
+        # Broadcast progress update
+        job = await self.job_repo.get_by_id(job_id)
+        if job:
+            await self._broadcast_job_progress(job_id, job.job_id)
+
+    async def _check_job_completion(self, job_id: str):
+        """
+        Check if job is complete and update status accordingly.
+
+        Args:
+            job_id: Job ID (MongoDB _id)
+        """
+        try:
+            job = await self.job_repo.get_by_id(job_id)
+            if not job:
+                logger.error(f"Job {job_id} not found")
+                return
+
+            # Check if all tools have been processed
+            if job.is_complete:
+                logger.info(f"Job {job.job_id} is complete: {job.tools_completed} succeeded, {job.tools_failed} failed")
+                await self.job_repo.update_status(job_id, JobStatus.COMPLETED)
+                await self._broadcast_job_status(job_id, job.job_id, JobStatus.COMPLETED)
+
+        except Exception as e:
+            logger.error(f"Error checking job completion for {job_id}: {e}")
+
+    async def get_job_tasks(self, job_id: str) -> List[Dict[str, Any]]:
+        """
+        Get all tasks for a job.
+
+        Args:
+            job_id: Job ID (MongoDB _id)
+
+        Returns:
+            List[Dict]: List of task data
+        """
+        try:
+            job = await self.job_repo.get_by_id(job_id)
+            if not job:
+                return []
+
+            # Get all tasks for this job
+            tasks = await self.task_repo.get_tasks_by_job(job.job_id)
+
+            return [task.model_dump() for task in tasks]
+
+        except Exception as e:
+            logger.error(f"Error getting tasks for job {job_id}: {e}")
+            return []
+
+    async def get_job_tools(self, job_id: str) -> List[Dict[str, Any]]:
+        """
+        Get all tools generated by a job.
+
+        Args:
+            job_id: Job ID (MongoDB _id)
+
+        Returns:
+            List[Dict]: List of tool data
+        """
+        try:
+            # Get all tasks for this job
+            tasks = await self.get_job_tasks(job_id)
+
+            # Extract tool IDs from tasks
+            tool_ids = [
+                task["tool_id"]
+                for task in tasks
+                if task.get("tool_id")
+            ]
+
+            if not tool_ids:
+                return []
+
+            # Get tools by IDs
+            tools = await self.tool_repo.get_by_ids(tool_ids)
+
+            return [tool.model_dump() for tool in tools]
+
+        except Exception as e:
+            logger.error(f"Error getting tools for job {job_id}: {e}")
+            return []
+
+    async def get_job_failures(self, job_id: str) -> List[Dict[str, Any]]:
+        """
+        Get all tool failures for a job.
+
+        Args:
+            job_id: Job ID (MongoDB _id)
+
+        Returns:
+            List[Dict]: List of failure data
+        """
+        try:
+            # Get all tasks for this job
+            tasks = await self.get_job_tasks(job_id)
+
+            # Extract failure IDs from tasks
+            failure_ids = [
+                task["tool_failure_id"]
+                for task in tasks
+                if task.get("tool_failure_id")
+            ]
+
+            if not failure_ids:
+                return []
+
+            # Get failures by IDs
+            failures = await self.tool_failure_repo.get_by_ids(failure_ids)
+
+            return [failure.model_dump() for failure in failures]
+
+        except Exception as e:
+            logger.error(f"Error getting failures for job {job_id}: {e}")
+            return []
+
+    async def _broadcast_job_status(self, job_id: str, job_id_short: str, status: JobStatus):
+        """Broadcast job status change via WebSocket.
+
+        Args:
+            job_id: Job MongoDB _id
+            job_id_short: Short job identifier (e.g., job_abc123)
+            status: New job status
+        """
+        if self.websocket_manager:
+            try:
+                message = {
+                    "type": "job-status-changed",
+                    "data": {
+                        "jobId": job_id_short,
+                        "status": status.value if isinstance(status, JobStatus) else status,
+                        "updatedAt": datetime.now(timezone.utc).isoformat()
+                    }
+                }
+                await self.websocket_manager.send_to_job(job_id_short, message)
+                logger.debug(f"Broadcasted job status change for {job_id_short}: {status}")
+            except Exception as e:
+                logger.error(f"Failed to broadcast job status for {job_id_short}: {e}")
+
+    async def _broadcast_job_progress(self, job_id: str, job_id_short: str):
+        """Broadcast job progress update via WebSocket.
+
+        Args:
+            job_id: Job MongoDB _id
+            job_id_short: Short job identifier (e.g., job_abc123)
+        """
+        if self.websocket_manager:
+            try:
+                job = await self.job_repo.get_by_id(job_id)
+                if job:
+                    message = {
+                        "type": "job-progress-updated",
+                        "data": {
+                            "jobId": job_id_short,
+                            "progress": {
+                                "total": job.total_tools,
+                                "completed": job.tools_completed,
+                                "failed": job.tools_failed,
+                                "inProgress": job.tools_in_progress
+                            },
+                            "updatedAt": datetime.now(timezone.utc).isoformat()
+                        }
+                    }
+                    await self.websocket_manager.send_to_job(job_id_short, message)
+                    logger.debug(f"Broadcasted job progress for {job_id_short}")
+            except Exception as e:
+                logger.error(f"Failed to broadcast job progress for {job_id_short}: {e}")

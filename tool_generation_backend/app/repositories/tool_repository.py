@@ -41,7 +41,7 @@ class ToolRepository(BaseRepository[Tool]):
     def _serialize_tool_data(
         self,
         result: ToolGenerationResult,
-        session_id: str,
+        task_id: str,
         file_path: str,
         code: str
     ) -> Dict[str, Any]:
@@ -50,7 +50,7 @@ class ToolRepository(BaseRepository[Tool]):
 
         Args:
             result: Tool generation result from agent
-            session_id: Session ID that generated this tool
+            task_id: Task ID that generated this tool
             file_path: Path where tool file is stored
             code: Python code implementation
 
@@ -68,13 +68,13 @@ class ToolRepository(BaseRepository[Tool]):
             "dependencies": result.dependencies,
             "test_cases": [],  # Will be added later if needed
             "status": ToolStatus.DRAFT.value,  # Serialize enum to string
-            "session_id": session_id
+            "task_id": task_id
         }
 
     async def create_from_generation_result(
         self,
         result: ToolGenerationResult,
-        session_id: str,
+        task_id: str,
         file_path: str,
         code: str
     ) -> str:
@@ -83,7 +83,7 @@ class ToolRepository(BaseRepository[Tool]):
 
         Args:
             result: Tool generation result from agent
-            session_id: Session ID that generated this tool
+            task_id: Task ID that generated this tool
             file_path: Path where tool file is stored
             code: Python code implementation
 
@@ -91,7 +91,7 @@ class ToolRepository(BaseRepository[Tool]):
             str: Created tool ID
         """
         try:
-            tool_data = self._serialize_tool_data(result, session_id, file_path, code)
+            tool_data = self._serialize_tool_data(result, task_id, file_path, code)
             tool_id = await self.create(tool_data)
             logger.info(f"Created tool {result.name} with ID {tool_id}")
             return tool_id
@@ -139,17 +139,17 @@ class ToolRepository(BaseRepository[Tool]):
 
         return await self.update(tool_id, update_data)
 
-    async def get_tools_by_session(self, session_id: str) -> List[Tool]:
+    async def get_tools_by_task(self, task_id: str) -> List[Tool]:
         """
-        Get all tools for a specific session.
+        Get all tools for a specific task.
 
         Args:
-            session_id: Session ID
+            task_id: Task ID
 
         Returns:
-            List[Tool]: Tools created in the session
+            List[Tool]: Tools created in the task
         """
-        return await self.find_by_field("session_id", session_id)
+        return await self.find_by_field("task_id", task_id)
 
     async def get_registered_tools(self, limit: Optional[int] = None) -> List[Tool]:
         """
@@ -272,8 +272,8 @@ class ToolRepository(BaseRepository[Tool]):
             # Unique index for name (deduplication)
             await self.collection.create_index("name", unique=True)
 
-            # Index for session queries
-            await self.collection.create_index("session_id")
+            # Index for task queries
+            await self.collection.create_index("task_id")
 
             # Index for status
             await self.collection.create_index("status")
