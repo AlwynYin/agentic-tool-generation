@@ -120,23 +120,25 @@ class ToolGenerationPipelineV2:
             if intake_output.validation_status == "invalid":
                 logger.error(f"Requirement validation failed: {intake_output.error}")
                 return ToolGenerationOutput(
-                    results=[],
-                    failures=[ToolGenerationFailure(
+                    success=False,
+                    result=None,
+                    failure=ToolGenerationFailure(
                         toolRequirement=requirement,
                         error=intake_output.error or "Invalid requirement",
                         error_type="invalid_requirement"
-                    )]
+                    )
                 )
 
             if not intake_output.tool_definition:
                 logger.error("Intake agent did not produce tool definition")
                 return ToolGenerationOutput(
-                    results=[],
-                    failures=[ToolGenerationFailure(
+                    success=False,
+                    result=None,
+                    failure=ToolGenerationFailure(
                         toolRequirement=requirement,
                         error="Failed to synthesize tool definition",
                         error_type="intake_error"
-                    )]
+                    )
                 )
 
             tool_definition = intake_output.tool_definition
@@ -196,12 +198,13 @@ class ToolGenerationPipelineV2:
                 if not impl_result.success:
                     logger.error(f"Implementation failed: {impl_result.error}")
                     return ToolGenerationOutput(
-                        results=[],
-                        failures=[ToolGenerationFailure(
+                        success=False,
+                        result=None,
+                        failure=ToolGenerationFailure(
                             toolRequirement=requirement,
                             error=impl_result.error or "Implementation failed",
                             error_type="implementation_error"
-                        )]
+                        )
                     )
 
                 logger.info(f"Tool implemented: {impl_result.tool_file_path}")
@@ -222,12 +225,13 @@ class ToolGenerationPipelineV2:
                 if not test_result.success:
                     logger.error(f"Test generation failed: {test_result.error}")
                     return ToolGenerationOutput(
-                        results=[],
-                        failures=[ToolGenerationFailure(
+                        success=False,
+                        result=None,
+                        failure=ToolGenerationFailure(
                             toolRequirement=requirement,
                             error=test_result.error or "Test generation failed",
                             error_type="test_generation_error"
-                        )]
+                        )
                     )
 
                 logger.info(f"Tests generated: {test_result.test_file_path}")
@@ -302,8 +306,9 @@ class ToolGenerationPipelineV2:
                     )
 
                     return ToolGenerationOutput(
-                        results=[result],
-                        failures=[]
+                        success=True,
+                        result=result,
+                        failure=None
                     )
 
                 # === STEP 8: SUMMARIZE ===
@@ -343,23 +348,25 @@ class ToolGenerationPipelineV2:
             )
 
             return ToolGenerationOutput(
-                results=[],
-                failures=[ToolGenerationFailure(
+                success=False,
+                result=None,
+                failure=ToolGenerationFailure(
                     toolRequirement=requirement,
                     error=error_message,
                     error_type="max_iterations_exceeded"
-                )]
+                )
             )
 
         except Exception as e:
             logger.error(f"Unexpected error in pipeline V2: {e}", exc_info=True)
             return ToolGenerationOutput(
-                results=[],
-                failures=[ToolGenerationFailure(
+                success=False,
+                result=None,
+                failure=ToolGenerationFailure(
                     toolRequirement=requirement,
                     error=f"Pipeline error: {str(e)}",
                     error_type="pipeline_error"
-                )]
+                )
             )
 
     def _extract_dependencies(self, plan) -> list[str]:

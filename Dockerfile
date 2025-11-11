@@ -1,6 +1,6 @@
 # Multi-stage build: Frontend + Backend
 # Stage 1: Build frontend
-FROM node:18-slim as frontend-builder
+FROM node:20-slim as frontend-builder
 
 WORKDIR /app/frontend
 
