@@ -59,11 +59,12 @@ async def extract_and_submit(request: ExtractionRequest) -> ExtractionResponse:
 
         logger.info(f"Extracted {len(requirements)} requirements")
 
-        # Submit job
+        # Submit job with task description
         job_service = JobService()
         job_id = await job_service.create_job(
             user_id=request.client_id,
-            tool_requirements=requirements
+            tool_requirements=requirements,
+            task_description=request.task_description
         )
 
         # Get job to get short ID

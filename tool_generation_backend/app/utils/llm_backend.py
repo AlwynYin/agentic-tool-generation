@@ -269,19 +269,20 @@ async def execute_llm_query(
         # Execute backend-specific command
         logger.info(f"Executing {backend.upper()} query command...")
         logger.info(f"Working directory: {settings.tools_service_path}")
-        logger.info(f"Timeout: 300 seconds")
+        timeout_sec = settings.llm_timeout
+        logger.info(f"Timeout: {timeout_sec} seconds")
 
         if backend == "codex":
             result = await run_codex_query(
                 query=prompt,
                 working_dir=settings.tools_service_path,
-                timeout=300
+                timeout=timeout_sec
             )
         elif backend == "claude":
             result = await run_claude_query(
                 query=prompt,
                 working_dir=settings.tools_service_path,
-                timeout=300
+                timeout=timeout_sec
             )
         else:
             return {

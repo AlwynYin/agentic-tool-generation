@@ -2,8 +2,8 @@
 Job management API endpoints for tool generation requests.
 """
 
-from typing import Dict, Any
-from fastapi import APIRouter, HTTPException, Depends, status
+from typing import Dict, Any, List
+from fastapi import APIRouter, HTTPException, Depends, status, Query
 from datetime import datetime, timezone
 
 import logging
@@ -24,6 +24,63 @@ router = APIRouter()
 async def get_job_service() -> JobService:
     """Get job service instance."""
     return JobService()
+
+
+@router.get("", response_model=List[JobResponse])
+async def list_jobs(
+    limit: int = Query(default=100, ge=1, le=500, description="Maximum number of jobs to return"),
+    skip: int = Query(default=0, ge=0, description="Number of jobs to skip (pagination)"),
+    job_service: JobService = Depends(get_job_service)
+) -> List[JobResponse]:
+    """
+    List all jobs with pagination.
+
+    Args:
+        limit: Maximum number of jobs to return (default: 100, max: 500)
+        skip: Number of jobs to skip for pagination (default: 0)
+        job_service: Job service instance
+
+    Returns:
+        List[JobResponse]: List of jobs ordered by creation date (newest first)
+    """
+    try:
+        logger.info(f"Listing jobs with limit={limit}, skip={skip}")
+
+        # Get jobs from repository
+        jobs = await job_service.job_repo.get_all_jobs(limit=limit, skip=skip)
+
+        # Convert to response models
+        job_responses = []
+        for job in jobs:
+            progress = JobProgress(
+                total=job.total_tools,
+                completed=job.tools_completed,
+                failed=job.tools_failed,
+                inProgress=job.tools_in_progress,
+                currentTool=None if job.is_complete else "processing"
+            )
+
+            job_responses.append(JobResponse(
+                jobId=job.job_id,
+                status=job.status.value if isinstance(job.status, JobStatus) else job.status,
+                createdAt=job.created_at.isoformat() if job.created_at else datetime.now(timezone.utc).isoformat(),
+                updatedAt=job.updated_at.isoformat() if job.updated_at else datetime.now(timezone.utc).isoformat(),
+                taskDescription=job.task_description,
+                toolRequirements=job.tool_requirements,
+                progress=progress
+            ))
+
+        logger.info(f"Retrieved {len(job_responses)} jobs")
+        return job_responses
+
+    except Exception as e:
+        logger.error(f"Failed to list jobs: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list jobs: {str(e)}"
+        )
 
 
 @router.post("", response_model=JobResponse, status_code=status.HTTP_201_CREATED)
@@ -74,6 +131,7 @@ async def submit_tool_generation_job(
             status=job.status.value if isinstance(job.status, JobStatus) else job.status,
             createdAt=job.created_at.isoformat() if job.created_at else datetime.now(timezone.utc).isoformat(),
             updatedAt=job.updated_at.isoformat() if job.updated_at else datetime.now(timezone.utc).isoformat(),
+            taskDescription=job.task_description,
             progress=progress
         )
 
@@ -161,6 +219,8 @@ async def get_job_status(
             status=job.status.value if isinstance(job.status, JobStatus) else job.status,
             createdAt=job.created_at.isoformat() if job.created_at else datetime.now(timezone.utc).isoformat(),
             updatedAt=job.updated_at.isoformat() if job.updated_at else datetime.now(timezone.utc).isoformat(),
+            taskDescription=job.task_description,
+            toolRequirements=job.tool_requirements,
             progress=progress,
             toolFiles=tool_files_response,
             failures=failures_response,
@@ -178,6 +238,50 @@ async def get_job_status(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get job status: {str(e)}"
+        )
+
+
+@router.get("/{jobId}/tasks")
+async def get_job_tasks(
+    jobId: str,
+    job_service: JobService = Depends(get_job_service)
+) -> List[Dict[str, Any]]:
+    """
+    Get all tasks for a specific job.
+
+    Args:
+        jobId: Job ID (short identifier, e.g., job_abc123)
+        job_service: Job service instance
+
+    Returns:
+        List of tasks with their details
+    """
+    try:
+        # Get job by job_id to get the DB ID
+        job = await job_service.get_job_by_job_id(jobId)
+        if not job:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Job not found: {jobId}"
+            )
+
+        logger.info(f"Getting tasks for job {jobId}")
+
+        # Get all tasks for this job using the DB ID
+        tasks = await job_service.get_job_tasks(job.id)
+
+        logger.info(f"Retrieved {len(tasks)} tasks for job {jobId}")
+        return tasks
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get tasks for job {jobId}: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get tasks: {str(e)}"
         )
 
 

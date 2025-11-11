@@ -32,6 +32,13 @@ class Settings(BaseSettings):
         env="LLM_BACKEND",
         description="LLM backend to use: 'codex' or 'claude'"
     )
+
+    llm_timeout: int = Field(
+        default=600,
+        env="LLM_TIMEOUT",
+        description="timeout for LLM backend in seconds"
+    )
+
     openai_api_key: str = Field(
         ...,
         env="OPENAI_API_KEY",
@@ -192,6 +199,12 @@ class Settings(BaseSettings):
         # Validate backend-specific API keys
         if self.llm_backend == "codex" and not self.openai_api_key:
             errors.append("OPENAI_API_KEY environment variable is required when using Codex backend")
+
+        if self.llm_backend == "claude" and not self.claude_api_key:
+            errors.append("CLAUSE_API_KEY environment variable is required when using CLADE backend")
+
+        if self.llm_timeout < 100:
+            errors.append("LLM_TIMEOUT is too short")
 
         if not self.mongodb_url:
             errors.append("MONGODB_URL environment variable is required")

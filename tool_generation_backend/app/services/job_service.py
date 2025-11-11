@@ -39,7 +39,8 @@ class JobService:
     async def create_job(
         self,
         user_id: str,
-        tool_requirements: List[UserToolRequirement]
+        tool_requirements: List[UserToolRequirement],
+        task_description: Optional[str] = None
     ) -> str:
         """
         Create a new job and spawn tasks for each tool requirement.
@@ -47,6 +48,7 @@ class JobService:
         Args:
             user_id: User identifier
             tool_requirements: List of tool requirements to generate
+            task_description: Optional natural language description of the task
 
         Returns:
             str: Job ID (MongoDB _id)
@@ -61,6 +63,7 @@ class JobService:
                 "user_id": user_id,
                 "operation_type": "generate",
                 "tool_requirements": [req.model_dump() for req in tool_requirements],
+                "task_description": task_description,
                 "status": JobStatus.PENDING.value,
                 "task_ids": [],
                 "tools_completed": 0,

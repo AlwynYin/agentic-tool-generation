@@ -39,6 +39,11 @@ class Job(DatabaseModel):
         description="User tool requirements for generation"
     )
 
+    task_description: Optional[str] = Field(
+        default=None,
+        description="Optional natural language description of the task (from extract-and-submit)"
+    )
+
     status: JobStatus = Field(
         default=JobStatus.PENDING,
         description="Current job status"
@@ -130,6 +135,8 @@ class JobResponse(BaseModel):
     status: str  # 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
     createdAt: str  # ISO timestamp
     updatedAt: str  # ISO timestamp
+    taskDescription: Optional[str] = Field(None, description="Optional natural language task description")
+    toolRequirements: Optional[List[UserToolRequirement]] = Field(None, description="Tool requirements for this job")
     progress: JobProgress
     toolFiles: Optional[List[ToolFile]] = Field(None, description="Generated tool files (only when completed)")
     failures: Optional[List[ToolGenerationFailure]] = Field(None, description="Failed tool generations")

@@ -257,6 +257,29 @@ class JobRepository(BaseRepository[Job]):
             sort_by="created_at"
         )
 
+    async def get_all_jobs(self, limit: int = 100, skip: int = 0) -> List[Job]:
+        """
+        Get all jobs with pagination support.
+
+        Args:
+            limit: Maximum number of jobs to return
+            skip: Number of jobs to skip (for pagination)
+
+        Returns:
+            List[Job]: All jobs ordered by creation date (newest first)
+        """
+        try:
+            cursor = self.collection.find({})
+            cursor = cursor.sort("created_at", -1)  # Descending order (newest first)
+            cursor = cursor.skip(skip).limit(limit)
+
+            documents = await cursor.to_list(length=None)
+            return [self._document_to_model(doc) for doc in documents]
+
+        except Exception as e:
+            logger.error(f"Failed to get all jobs: {e}")
+            return []
+
     async def ensure_indexes(self):
         """Create indexes for optimal query performance."""
         try:

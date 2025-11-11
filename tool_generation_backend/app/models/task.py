@@ -134,8 +134,8 @@ class TaskResponse(BaseModelConfig):
     job_id: str = Field(description="Parent job ID")
     status: TaskStatus = Field(description="Current task status")
     tool_requirement: UserToolRequirement = Field(description="Tool requirement")
-    created_at: datetime = Field(description="Task creation timestamp")
-    updated_at: Optional[datetime] = Field(
+    created_at: str = Field(description="Task creation timestamp (ISO format)")
+    updated_at: Optional[str] = Field(
         default=None,
-        description="Last update timestamp"
+        description="Last update timestamp (ISO format)"
     )
