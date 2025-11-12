@@ -394,12 +394,9 @@ class TaskService:
             if not task:
                 raise ValueError(f"Task not found: {task_id}")
 
-            # Read generated code from file (tools/<job_id>/<task_id>/<tool_name>.py)
             file_path = os.path.join(self.settings.tools_path, task.job_id, task.task_id, tool_result.file_name)
-            with open(file_path, "r") as file:
-                tool_code = file.read()
 
-            # Read all additional files (test, plan, search results)
+            # Read all files (code, test, plan, search results)
             additional_files = self._read_task_files(task, tool_result.name)
 
             # Check if tool already exists (deduplication)
@@ -421,7 +418,6 @@ class TaskService:
                     result=tool_result,
                     task_id=task_id,
                     file_path=file_path,
-                    code=tool_code,
                     **additional_files  # Pass all file contents
                 )
 
