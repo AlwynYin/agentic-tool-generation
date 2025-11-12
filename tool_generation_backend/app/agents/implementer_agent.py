@@ -166,7 +166,6 @@ class ImplementerAgent:
             plan_file = plan_dir / "implementation_plan.txt"
             with open(plan_file, 'w') as f:
                 f.write(f"# Implementation Plan for {plan.requirement_name}\n\n")
-                f.write(f"## Description\n{plan.requirement_docstring}\n\n")
 
                 f.write("## Implementation Steps\n\n")
                 for step in plan.steps:
@@ -260,7 +259,6 @@ class ImplementerAgent:
 ## Task
 
 **Tool Name:** {plan.requirement_name}
-**Description:** {plan.requirement_docstring}
 **Target File:** {tools_dir_rel}/{plan.requirement_name}.py
 
 ## Context Files
