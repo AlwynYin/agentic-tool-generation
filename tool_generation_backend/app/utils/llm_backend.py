@@ -14,7 +14,6 @@ from datetime import datetime
 import json
 
 from app.config import get_settings
-from app.models import ToolRequirement, ImplementationPlan
 from app.models.api_reference import ApiBrowseResult
 from app.utils.codex_utils import run_codex_query
 from app.utils.claude_utils import run_claude_query

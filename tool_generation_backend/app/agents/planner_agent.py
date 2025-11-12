@@ -119,8 +119,8 @@ class PlannerAgent:
                 plan.requirement_signature = tool_definition.signature
             if not plan.requirement_docstring:
                 plan.requirement_docstring = tool_definition.docstring
-            if not plan.requirement_contrast:
-                plan.requirement_contrast = [contrast for contrast in tool_definition.contrast]
+            if not plan.requirement_contracts:
+                plan.requirement_contracts = tool_definition.contracts
 
             logger.info(f"Plan created with {len(plan.steps)} steps")
 
@@ -133,7 +133,9 @@ class PlannerAgent:
                 task_id=task_id,
                 job_id=job_id,
                 requirement_name=tool_definition.name,
+                requirement_signature="",
                 requirement_docstring=f"Error creating plan: {str(e)}",
+                requirement_contracts=[],
                 steps=[],
                 validation_rules=[],
                 expected_artifacts=[]
@@ -219,7 +221,7 @@ ImplementationPlan(
     requirement_name="",  # Will be filled by system
     requirement_signature="",  # Revised signature of tool
     requirement_docstring="",  # Revised docstring of tool
-    requirement_contrast=[],  # Revised contrast of tool
+    requirement_contracts=[],  # Revised contracts of tool
     api_refs=[], # a list of apis to be used
     steps=[PlanStep(...), PlanStep(...), ...],
     validation_rules=["Rule 1", "Rule 2", ...],
@@ -228,8 +230,8 @@ ImplementationPlan(
 ```
 
 ## Step 1: Revise the tool definition
-If you believe any of the signature, docstring, and contrast needs to be revised, generate your revised requirement_signature, requirement_docstring, and requirement_contrast respectively.
-If you believe any of them does not need revision, leave them blank, e.g. requirement_signature="", requirement_docstring="", requirement_contrast=[]
+If you believe any of the signature, docstring, and contracts needs to be revised, generate your revised requirement_signature, requirement_docstring, and requirement_contracts respectively.
+If you believe any of them does not need revision, leave them blank, e.g. requirement_signature="", requirement_docstring="", requirement_contracts=[]
 
 ## Step 2: Create Step-by-Step Plan
 

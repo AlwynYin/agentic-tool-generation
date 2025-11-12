@@ -5,7 +5,6 @@ from .specs import ParameterSpec, OutputSpec, UserToolRequirement
 from .task import (
     TaskStatus,
     ToolRequirement,
-    ImplementationPlan,
     Task,
     TaskCreate,
     TaskUpdate,
@@ -54,13 +53,7 @@ __all__ = [
     "OutputSpec",
     "UserToolRequirement",
     # Session models
-    "SessionStatus",
     "ToolRequirement",
-    "ImplementationPlan",
-    "Session",
-    "SessionCreate",
-    "SessionUpdate",
-    "SessionResponse",
     # Agent models removed - using OpenAI Agent SDK
     # Tool models
     "Tool",
