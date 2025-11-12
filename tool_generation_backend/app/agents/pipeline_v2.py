@@ -13,7 +13,7 @@ from typing import Optional
 from app.config import get_settings
 from app.models.specs import UserToolRequirement
 from app.models.tool_generation import ToolGenerationOutput, ToolGenerationResult, ToolGenerationFailure
-from app.models.pipeline_v2 import IterationData, IterationSummary
+from app.models.pipeline_v2 import IterationData, IterationSummary, ToolDefinition
 from app.utils.pytest_runner import get_pytest_runner
 from app.utils.code_parser import parse_function_from_code, extract_description_from_code
 from app.utils.task_logger import get_task_logger, log_divider, log_multiline
@@ -156,11 +156,7 @@ class ToolGenerationPipelineV2:
                 task_id=task_id,
                 job_id=job_id
             )
-            logger.info(f"Found {len(exploration_report.apis)} APIs, {len(exploration_report.examples)} examples")
-
-            pipeline_logger.debug(f"APIs found: {len(exploration_report.apis)}")
-            pipeline_logger.debug(f"Examples found: {len(exploration_report.examples)}")
-            pipeline_logger.debug(f"Question answers: {len(exploration_report.question_answers)}")
+            logger.info(f"exploration completed, report in {exploration_report.api_refs_file}")
 
             # ===== STEP 3: PLAN =====
             log_divider(pipeline_logger, "STEP 3: PLAN")
@@ -170,6 +166,12 @@ class ToolGenerationPipelineV2:
                 exploration_report,
                 task_id=task_id,
                 job_id=job_id or "unknown"
+            )
+            revised_definition = ToolDefinition(
+                name=plan.requirement_name,
+                signature=plan.requirement_signature,
+                docstring=plan.requirement_docstring,
+                contracts=plan.requirement_contracts
             )
             logger.info(f"Plan created with {len(plan.steps)} steps")
 
@@ -189,7 +191,7 @@ class ToolGenerationPipelineV2:
                 pipeline_logger.debug(f"Step 4: Implementing tool (iteration {iteration})")
                 logger.info(f"Step 4 (iter {iteration}): Implement - Generating tool code")
                 impl_result = await self.implementer_agent.implement(
-                    tool_definition,
+                    revised_definition,
                     plan,
                     exploration_report,
                     iteration_history
@@ -216,7 +218,7 @@ class ToolGenerationPipelineV2:
                 pipeline_logger.debug(f"Step 5: Generating tests (iteration {iteration})")
                 logger.info(f"Step 5 (iter {iteration}): Test - Generating test suite")
                 test_result = await self.test_agent.generate_tests(
-                    tool_definition,
+                    revised_definition,
                     plan,
                     exploration_report,
                     iteration_history
@@ -289,7 +291,7 @@ class ToolGenerationPipelineV2:
                     description = extract_description_from_code(impl_result.tool_code)
                     if not description:
                         # Fallback to tool definition
-                        description = tool_definition.docstring.split('\n')[0]
+                        description = revised_definition.docstring.split('\n')[0]
 
                     # Use the actual function name from code (in case it differs)
                     function_name = actual_func_name if actual_func_name != "unknown" else tool_definition.name

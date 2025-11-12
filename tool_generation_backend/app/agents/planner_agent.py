@@ -114,7 +114,13 @@ class PlannerAgent:
             plan.task_id = task_id
             plan.job_id = job_id
             plan.requirement_name = tool_definition.name
-            plan.requirement_description = tool_definition.docstring
+            # plan.requirement_description = tool_definition.docstring
+            if not plan.requirement_signature:
+                plan.requirement_signature = tool_definition.signature
+            if not plan.requirement_docstring:
+                plan.requirement_docstring = tool_definition.docstring
+            if not plan.requirement_contrast:
+                plan.requirement_contrast = [contrast for contrast in tool_definition.contrast]
 
             logger.info(f"Plan created with {len(plan.steps)} steps")
 
@@ -127,7 +133,7 @@ class PlannerAgent:
                 task_id=task_id,
                 job_id=job_id,
                 requirement_name=tool_definition.name,
-                requirement_description=f"Error creating plan: {str(e)}",
+                requirement_docstring=f"Error creating plan: {str(e)}",
                 steps=[],
                 validation_rules=[],
                 expected_artifacts=[]
@@ -143,45 +149,33 @@ class PlannerAgent:
 
         Args:
             tool_definition: Tool specification
-            exploration_report: API findings
+            exploration_report: API findings (markdown file reference)
 
         Returns:
             Formatted message for the agent
         """
-        # Format API functions
-        if exploration_report.apis:
-            apis_text = "Available APIs:\n"
-            for api in exploration_report.apis[:5]:  # Limit to top 5 most relevant
-                apis_text += f"- {api.function_name}: {api.description}\n"
-                if api.input_schema:
-                    params = ", ".join([f"{p.name}: {p.type}" for p in api.input_schema])
-                    apis_text += f"  Parameters: {params}\n"
-                if api.output_schema:
-                    apis_text += f"  Returns: {api.output_schema.type} - {api.output_schema.description}\n"
-                apis_text += "\n"
+        # Read markdown search results
+        search_results_text = ""
+        if exploration_report.api_refs_file and exploration_report.api_refs_file.endswith('.md'):
+            try:
+                with open(exploration_report.api_refs_file, 'r') as f:
+                    markdown_content = f.read()
+                    search_results_text = f"""
+---
+
+## API Exploration Results
+
+The following information was gathered from documentation research:
+
+{markdown_content}
+
+---
+"""
+            except Exception as e:
+                logger.error(f"Failed to read markdown search results: {e}")
+                search_results_text = "\n---\n\nNo API exploration results available.\n\n---\n"
         else:
-            apis_text = "No specific APIs found. Use general library knowledge.\n"
-
-        # Format code examples
-        examples_text = ""
-        if exploration_report.examples:
-            examples_text = "Code Examples:\n"
-            for i, example in enumerate(exploration_report.examples[:3], 1):  # Top 3 examples
-                examples_text += f"Example {i}:\n{example.code}\n\n"
-
-        # Format question answers from documentation research
-        qa_text = ""
-        if exploration_report.question_answers:
-            qa_text = "**Question & Answers from Documentation:**\n\n"
-            for qa in exploration_report.question_answers:
-                qa_text += f"Q: {qa.question}\n"
-                qa_text += f"Type: {qa.type}\n"
-                qa_text += f"A: {qa.answer}\n"
-                if qa.library:
-                    qa_text += f"Library: {qa.library}\n"
-                if qa.code_example:
-                    qa_text += f"Example:\n{qa.code_example}\n"
-                qa_text += "\n"
+            search_results_text = "\n---\n\nNo API exploration results available.\n\n---\n"
 
         # Format contracts
         contracts_text = "\n".join([f"- {c}" for c in tool_definition.contracts])
@@ -198,18 +192,7 @@ class PlannerAgent:
 **Contracts:**
 {contracts_text}
 
----
-
-{apis_text}
-
-{examples_text}
-
-{qa_text}
-
-**Entry Points Found:**
-{', '.join(exploration_report.entry_points[:5]) if exploration_report.entry_points else 'None'}
-
----
+{search_results_text}
 
 Create a comprehensive implementation plan following the structure in your instructions.
 """
@@ -234,7 +217,9 @@ ImplementationPlan(
     task_id="",  # Will be filled by system
     job_id="",  # Will be filled by system
     requirement_name="",  # Will be filled by system
-    requirement_description="",  # Will be filled by system
+    requirement_signature="",  # Revised signature of tool
+    requirement_docstring="",  # Revised docstring of tool
+    requirement_contrast=[],  # Revised contrast of tool
     api_refs=[], # a list of apis to be used
     steps=[PlanStep(...), PlanStep(...), ...],
     validation_rules=["Rule 1", "Rule 2", ...],
@@ -242,7 +227,11 @@ ImplementationPlan(
 )
 ```
 
-## Step 1: Create Step-by-Step Plan
+## Step 1: Revise the tool definition
+If you believe any of the signature, docstring, and contrast needs to be revised, generate your revised requirement_signature, requirement_docstring, and requirement_contrast respectively.
+If you believe any of them does not need revision, leave them blank, e.g. requirement_signature="", requirement_docstring="", requirement_contrast=[]
+
+## Step 2: Create Step-by-Step Plan
 
 Break down implementation into discrete steps. Each step is a `PlanStep`:
 
@@ -313,7 +302,7 @@ steps=[
 ]
 ```
 
-## Step 2: Define Validation Rules
+## Step 3: Define Validation Rules
 
 List specific validation checks to implement:
 
@@ -345,7 +334,7 @@ validation_rules=[
 ]
 ```
 
-## Step 3: Specify Expected Artifacts
+## Step 4: Specify Expected Artifacts
 
 List what will be created:
 

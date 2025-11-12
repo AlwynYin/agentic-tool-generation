@@ -72,7 +72,7 @@ export const JobDetailsPage: React.FC = () => {
       // Map tasks to card data
       const taskCards: TaskCardData[] = tasksData.map((task: any) => ({
         taskId: task.task_id,
-        toolName: task.tool_requirement?.description?.split(' ')[0] || task.task_id,
+        toolName: task.task_id.split('_')[1],
         status: task.status as TaskStatus,
         description: task.tool_requirement?.description || 'No description',
       }));

@@ -104,7 +104,7 @@ async def execute_llm_browse(
 
         # Create output filename with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_filename = f"api_refs_{timestamp}.json"
+        output_filename = f"api_refs_{timestamp}.md"
 
         # Determine output directory based on whether task_id/job_id are provided
         if task_id and job_id:
@@ -186,25 +186,24 @@ async def execute_llm_browse(
                 error=f"Output file not created by {backend.upper()}: {output_path}"
             )
 
-        # Read the JSON output as raw string
+        # Read the markdown output as raw string
         try:
             with open(output_path, 'r') as f:
                 search_results_content = f.read()
 
-            # Validate it's valid JSON
-            try:
-                json.loads(search_results_content)
-            except json.JSONDecodeError as e:
-                logger.error(f"Invalid JSON in output file: {e}")
+            # Validate the file is not empty
+            if not search_results_content or len(search_results_content.strip()) == 0:
+                logger.error(f"Output file is empty: {output_path}")
                 return ApiBrowseResult(
                     success=False,
                     library=",".join(libraries),
                     queries=questions,
                     file_name=str(output_filename),
-                    error=f"Invalid JSON in output file: {e}"
+                    error=f"Output file is empty: {output_path}"
                 )
 
             logger.info(f"Successfully retrieved search results from {output_path}")
+            logger.info(f"Markdown content length: {len(search_results_content)} characters")
             return ApiBrowseResult(
                 success=True,
                 library=",".join(libraries),
@@ -393,52 +392,57 @@ Your task:
 2. Search the relevant library's documentation to answer the question
 3. Extract relevant API functions that would be needed
 
-Output your findings as JSON with this EXACT structure:
-{{
-  "question_answers": [
-    {{
-      "question": "Original question text",
-      "type": "api_discovery|method_selection|parameter_tuning|format_handling|error_handling|units",
-      "answer": "Detailed answer from documentation",
-      "library": "rdkit|ase|pymatgen|pyscf|orca|null",
-      "code_example": "Optional code snippet demonstrating the answer"
-    }}
-  ],
-  "api_functions": [
-    {{
-      "function_name": "module.submodule.function_name",
-      "description": "What the function does",
-      "input_schema": [
-        {{
-          "name": "param1",
-          "type": "str",
-          "description": "Parameter description",
-        }}
-      ],
-      "output_schema": {{
-        "type": "float",
-        "description": "Output description",
-        "units": "Optional units (e.g., 'eV', 'Angstroms')"
-      }},
-      "examples": [
-        {{
-          "description": "Example description",
-          "code": "from module import func\\nresult = func('value')",
-          "source": "documentation"
-        }}
-      ]
-    }}
-  ]
-}}
+Output your findings as MARKDOWN with this structure:
+
+# API Exploration Report
+
+## Question & Answer Section
+
+### Q1: [Original question text]
+**Type**: [api_discovery|method_selection|parameter_tuning|format_handling|error_handling|units]
+**Library**: [rdkit|ase|pymatgen|pyscf|orca|none]
+**Answer**: [Detailed answer from documentation]
+
+**Code Example** (if applicable):
+```python
+[Code snippet demonstrating the answer]
+```
+
+### Q2: [Next question]
+...
+
+## API Functions
+
+### Function: `module.submodule.function_name`
+
+**Description**: [What the function does]
+
+**Parameters**:
+- `param1` (type): [Parameter description]
+- `param2` (type): [Parameter description]
+
+**Returns**: [Return type] - [Output description, including units if applicable]
+
+**Examples**:
+
+```python
+# Example 1: [Description]
+from module import func
+result = func('value')
+```
+
+### Function: `next.function.name`
+...
 
 Guidelines:
 - For API discovery questions: Extract the specific function(s) needed
-- For other questions: Answer the question
+- For other questions: Answer the question with clear explanations
+- Use proper markdown formatting with code blocks for examples
 
 IMPORTANT:
 - Save your output to: {output_path_relative}
-- Use valid JSON format
+- Use proper markdown format with headers, code blocks, and formatting
 - Answer ALL questions, even if some require searching multiple libraries
 - Include complete function signatures with accurate types
-- Provide working code examples
+- Provide working code examples with proper syntax highlighting
 """

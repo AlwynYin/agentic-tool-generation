@@ -143,7 +143,7 @@ class Settings(BaseSettings):
     )
 
     pytest_timeout: int = Field(
-        default=60,
+        default=300,
         env="PYTEST_TIMEOUT",
         description="Timeout for pytest execution in seconds"
     )

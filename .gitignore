@@ -43,6 +43,7 @@ packages/*/src/**/*.js
 packages/*/src/**/*.js.map
 # But keep JS config files
 !packages/*/src/**/*.config.js
+/tool_service/
 
 tool_service/tools/*
 tool_service/repos/*

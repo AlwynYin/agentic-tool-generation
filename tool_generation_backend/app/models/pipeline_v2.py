@@ -60,47 +60,11 @@ class OutputSpec(BaseModel):
     units: Optional[str] = None
 
 
-class CodeExample(BaseModel):
-    """
-    Code example from documentation or tests.
-    """
-    code: str
-    description: str
-    source: str = Field(..., description="Source file path or URL")
-
-
-class ApiFunction(BaseModel):
-    """
-    API function reference from library documentation.
-    """
-    function_name: str = Field(..., description="Fully qualified name (e.g., 'rdkit.Chem.Descriptors.MolWt')")
-    description: str
-    input_schema: List[ParameterSpec]
-    output_schema: OutputSpec
-    examples: List[CodeExample] = Field(default_factory=list)
-
-
-class QuestionAnswer(BaseModel):
-    """
-    Answer to an open question from Intake Agent.
-    """
-    question: str = Field(..., description="Original question from Intake Agent")
-    type: str = Field(..., description="Type: 'api_discovery', 'method_selection', 'parameter_tuning', 'format_handling', 'error_handling', 'units'")
-    answer: str = Field(..., description="Detailed answer extracted from documentation")
-    library: Optional[str] = Field(None, description="Relevant library (rdkit, ase, pymatgen, pyscf, orca)")
-    code_example: Optional[str] = Field(None, description="Code snippet demonstrating the answer")
-
-
 class ExplorationReport(BaseModel):
     """
     Consolidated report from Search Agent exploration.
     """
-    apis: List[ApiFunction] = Field(default_factory=list, description="Relevant API functions found")
-    paths: List[str] = Field(default_factory=list, description="Relevant file paths in repository")
-    entry_points: List[str] = Field(default_factory=list, description="Main functions to call")
-    examples: List[CodeExample] = Field(default_factory=list, description="Code examples from docs/tests")
     api_refs_file: str = Field(..., description="Path to generated API reference file (.md or .json)")
-    question_answers: List[QuestionAnswer] = Field(default_factory=list, description="Answers to open questions from Intake Agent")
 
 
 # ===== Planner Agent Models =====
@@ -124,7 +88,10 @@ class ImplementationPlan(BaseModel):
     task_id: str
     job_id: str
     requirement_name: str = Field(..., description="Tool name from requirement")
-    requirement_description: str = Field(..., description="Tool description")
+    requirement_signature: str = Field(..., description="Tool signature from requirement")
+    requirement_docstring: str = Field(..., description="Tool docstring")
+    requirement_contracts: List[str] = Field(default_factory=list, description="Tool pre/post conditions and validation rules")
+
 
     # API references
     api_refs: List[str] = Field(default_factory=list, description="List of API function names to use")

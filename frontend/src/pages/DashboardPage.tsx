@@ -101,7 +101,7 @@ export const DashboardPage: React.FC = () => {
   }
 
   return (
-    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+    <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
       <Stack spacing={3}>
         {/* Header */}
         <Box display="flex" justifyContent="space-between" alignItems="center">
@@ -145,10 +145,10 @@ export const DashboardPage: React.FC = () => {
         ) : (
           <Grid container spacing={3}>
             {jobs.map((job) => (
-              <Grid item xs={12} sm={6} md={4} key={job.jobId}>
-                <Card>
-                  <CardActionArea onClick={() => handleJobClick(job.jobId)}>
-                    <CardContent>
+              <Grid item xs={12} sm={6} md={4} lg={3} xl={2} key={job.jobId}>
+                <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                  <CardActionArea onClick={() => handleJobClick(job.jobId)} sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
+                    <CardContent sx={{ width: '100%', flexGrow: 1 }}>
                       {/* Job ID and Status */}
                       <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
                         <Typography variant="h6" component="div" noWrap>
@@ -162,11 +162,9 @@ export const DashboardPage: React.FC = () => {
                       </Box>
 
                       {/* Task Description */}
-                      {job.taskDescription && (
-                        <Typography variant="body2" color="text.secondary" sx={{ mb: 2, minHeight: 40 }}>
-                          {truncateDescription(job.taskDescription)}
-                        </Typography>
-                      )}
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 2, minHeight: 40 }}>
+                        {job.taskDescription ? truncateDescription(job.taskDescription) : '\u00A0'}
+                      </Typography>
 
                       {/* Progress */}
                       <Box sx={{ mb: 1 }}>
@@ -186,7 +184,7 @@ export const DashboardPage: React.FC = () => {
                       </Box>
 
                       {/* Stats */}
-                      <Box display="flex" gap={1} flexWrap="wrap">
+                      <Box display="flex" gap={1} flexWrap="wrap" sx={{ minHeight: 32 }}>
                         {job.progress.completed > 0 && (
                           <Chip
                             label={`✓ ${job.progress.completed}`}

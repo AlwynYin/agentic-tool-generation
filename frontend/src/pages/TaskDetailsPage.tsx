@@ -231,13 +231,13 @@ export const TaskDetailsPage: React.FC = () => {
             <Tab
               icon={<CodeIcon />}
               iconPosition="start"
-              label={`Tool Code${files?.toolFileName ? ` (${files.toolFileName})` : ''}`}
+              label={"Tool Code"}
               disabled={!files?.toolCode}
             />
             <Tab
               icon={<BugReportIcon />}
               iconPosition="start"
-              label={`Test Code${files?.testFileName ? ` (${files.testFileName})` : ''}`}
+              label={"Test Code"}
               disabled={!files?.testCode}
             />
           </Tabs>
