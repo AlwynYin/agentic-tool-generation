@@ -120,6 +120,14 @@ class ToolFile(BaseModel):
     endpoint: Optional[str] = Field(None, description="SimpleTooling HTTP endpoint URL")
     registered: bool = Field(..., description="Whether registered with SimpleTooling")
     createdAt: str = Field(..., description="ISO timestamp")
+    # Additional file contents
+    testCode: Optional[str] = Field(None, description="Test file contents")
+    implementationPlan: Optional[str] = Field(None, description="Implementation plan")
+    functionSpec: Optional[str] = Field(None, description="Function specification")
+    contractsPlan: Optional[str] = Field(None, description="Contracts file contents")
+    validationRules: Optional[str] = Field(None, description="Validation rules")
+    testRequirements: Optional[str] = Field(None, description="Test requirements")
+    searchResults: Optional[str] = Field(None, description="API exploration results")
 
 
 class GenerationSummary(BaseModel):

@@ -52,6 +52,36 @@ class Tool(DatabaseModel):
         description="Last task that used/updated this tool"
     )
 
+    # File contents for display
+    test_code: Optional[str] = Field(
+        default=None,
+        description="Test file contents"
+    )
+    implementation_plan: Optional[str] = Field(
+        default=None,
+        description="Implementation plan file contents"
+    )
+    function_spec: Optional[str] = Field(
+        default=None,
+        description="Function specification file contents"
+    )
+    contracts_plan: Optional[str] = Field(
+        default=None,
+        description="Contracts file contents"
+    )
+    validation_rules: Optional[str] = Field(
+        default=None,
+        description="Validation rules file contents"
+    )
+    test_requirements: Optional[str] = Field(
+        default=None,
+        description="Test requirements file contents"
+    )
+    search_results: Optional[str] = Field(
+        default=None,
+        description="API exploration results (markdown)"
+    )
+
 
 class ToolExecutionRequest(BaseModelConfig):
     """Request model for tool execution."""

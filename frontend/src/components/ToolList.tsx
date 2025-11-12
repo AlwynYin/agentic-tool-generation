@@ -14,7 +14,7 @@ import {
 import CodeIcon from '@mui/icons-material/Code';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import { ToolFile, ToolGenerationFailure } from '../types';
-import { ToolCodeViewer } from './ToolCodeViewer';
+import { TabbedCodeViewer } from './TabbedCodeViewer';
 
 interface ToolListProps {
   tools: ToolFile[];
@@ -107,7 +107,7 @@ export function ToolList({ tools, failures }: ToolListProps) {
         </CardContent>
       </Card>
 
-      <ToolCodeViewer
+      <TabbedCodeViewer
         tool={selectedTool}
         open={viewerOpen}
         onClose={handleViewerClose}

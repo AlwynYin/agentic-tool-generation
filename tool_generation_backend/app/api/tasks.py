@@ -109,6 +109,12 @@ async def get_task_files(
             "testCode": None,
             "toolFileName": None,
             "testFileName": None,
+            "implementationPlan": None,
+            "functionSpec": None,
+            "contractsPlan": None,
+            "validationRules": None,
+            "testRequirements": None,
+            "searchResults": None,
             "error": None
         }
 
@@ -116,82 +122,60 @@ async def get_task_files(
         if task.tool_id:
             tool = await task_service.tool_repo.get_by_id(task.tool_id)
             if tool:
-                # Tool code is stored in the database
+                # Tool code and all files are stored in the database
                 response["toolCode"] = tool.code
                 response["toolFileName"] = tool.file_name
+                response["testCode"] = tool.test_code
+                response["implementationPlan"] = tool.implementation_plan
+                response["functionSpec"] = tool.function_spec
+                response["contractsPlan"] = tool.contracts_plan
+                response["validationRules"] = tool.validation_rules
+                response["testRequirements"] = tool.test_requirements
+                response["searchResults"] = tool.search_results
 
-                # Try to find test file in tests/ subdirectory
-                # Test files are typically in tests/test_{tool_name}.py
-                tool_name = Path(tool.file_name).stem  # Remove .py extension
-                test_file_name = f"test_{tool_name}.py"
-
-                # Check in tests/ subdirectory
-                test_file_path = task_dir / "tests" / test_file_name
-                if not test_file_path.exists():
-                    # Fallback: check directly in task directory
-                    test_file_path = task_dir / test_file_name
-
-                if test_file_path.exists():
-                    try:
-                        response["testCode"] = test_file_path.read_text(encoding="utf-8")
-                        response["testFileName"] = test_file_name
-                        logger.info(f"Found test file: {test_file_path}")
-                    except Exception as e:
-                        logger.warning(f"Failed to read test file {test_file_path}: {e}")
-                        response["error"] = f"Failed to read test file: {str(e)}"
-                else:
-                    logger.warning(f"Test file not found: {test_file_path}")
-                    response["error"] = f"Test file not found: {test_file_name}"
+                # Set test file name if test code exists
+                if tool.test_code:
+                    tool_name = Path(tool.file_name).stem
+                    response["testFileName"] = f"test_{tool_name}.py"
+                    logger.info(f"Retrieved test code from database")
             else:
                 logger.warning(f"Tool not found for task {taskId}: {task.tool_id}")
                 response["error"] = f"Tool not found: {task.tool_id}"
 
         elif task.status == TaskStatus.FAILED or task.tool_failure_id:
-            # Task failed - get error message and try to find any generated files
+            # Task failed - get error message and partial files from database
 
             # First, get the error message
             error_msg = task.error_message or "Task failed"
 
-            # If there's a tool_failure record, get more details
+            # If there's a tool_failure record, get more details and partial files
             if task.tool_failure_id:
                 try:
                     failure = await task_service.tool_failure_repo.get_by_id(task.tool_failure_id)
                     if failure:
                         error_msg = failure.error_message or error_msg
-                        logger.info(f"Retrieved failure details for task {taskId}")
+                        # Get partial files from database
+                        response["toolCode"] = failure.code
+                        response["testCode"] = failure.test_code
+                        response["implementationPlan"] = failure.implementation_plan
+                        response["functionSpec"] = failure.function_spec
+                        response["contractsPlan"] = failure.contracts_plan
+                        response["validationRules"] = failure.validation_rules
+                        response["testRequirements"] = failure.test_requirements
+                        response["searchResults"] = failure.search_results
+
+                        # Set file names if code exists
+                        if failure.code:
+                            # Try to extract tool name from requirement
+                            tool_name = failure.user_requirement.description.split()[0] if failure.user_requirement.description else "tool"
+                            tool_name = "".join(c for c in tool_name if c.isalnum() or c == "_").lower()
+                            response["toolFileName"] = f"{tool_name}.py"
+
+                        logger.info(f"Retrieved failure details and partial files for task {taskId}")
                 except Exception as e:
                     logger.warning(f"Failed to get failure details: {e}")
 
             response["error"] = error_msg
-
-            # Try to find any generated files in the task directory (partial work)
-            if task_dir.exists():
-                # Look for Python files (excluding test files)
-                tool_files = [f for f in task_dir.glob("*.py") if not f.name.startswith("test_")]
-
-                # Also check tests/ subdirectory
-                tests_dir = task_dir / "tests"
-                test_files = []
-                if tests_dir.exists():
-                    test_files = list(tests_dir.glob("test_*.py"))
-                else:
-                    test_files = [f for f in task_dir.glob("test_*.py")]
-
-                if tool_files:
-                    try:
-                        response["toolCode"] = tool_files[0].read_text(encoding="utf-8")
-                        response["toolFileName"] = tool_files[0].name
-                        logger.info(f"Found partial tool file: {tool_files[0]}")
-                    except Exception as e:
-                        logger.warning(f"Failed to read tool file {tool_files[0]}: {e}")
-
-                if test_files:
-                    try:
-                        response["testCode"] = test_files[0].read_text(encoding="utf-8")
-                        response["testFileName"] = test_files[0].name
-                        logger.info(f"Found partial test file: {test_files[0]}")
-                    except Exception as e:
-                        logger.warning(f"Failed to read test file {test_files[0]}: {e}")
 
         else:
             # Task is still in progress or pending

@@ -189,7 +189,15 @@ async def get_job_status(
                         code=tool_dict["code"],
                         endpoint=None,  # No endpoints since we're not using SimpleTooling
                         registered=tool_dict["status"] == ToolStatus.REGISTERED.value,
-                        createdAt=tool_dict["created_at"].isoformat() if isinstance(tool_dict.get("created_at"), datetime) else tool_dict.get("created_at", datetime.now(timezone.utc).isoformat())
+                        createdAt=tool_dict["created_at"].isoformat() if isinstance(tool_dict.get("created_at"), datetime) else tool_dict.get("created_at", datetime.now(timezone.utc).isoformat()),
+                        # Additional file contents
+                        testCode=tool_dict.get("test_code"),
+                        implementationPlan=tool_dict.get("implementation_plan"),
+                        functionSpec=tool_dict.get("function_spec"),
+                        contractsPlan=tool_dict.get("contracts_plan"),
+                        validationRules=tool_dict.get("validation_rules"),
+                        testRequirements=tool_dict.get("test_requirements"),
+                        searchResults=tool_dict.get("search_results")
                     )
                     for tool_dict in tools_data
                 ]

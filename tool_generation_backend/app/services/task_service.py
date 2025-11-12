@@ -399,13 +399,20 @@ class TaskService:
             with open(file_path, "r") as file:
                 tool_code = file.read()
 
+            # Read all additional files (test, plan, search results)
+            additional_files = self._read_task_files(task, tool_result.name)
+
             # Check if tool already exists (deduplication)
             existing_tool = await self.tool_repo.get_by_name(tool_result.name)
 
             if existing_tool:
-                # Tool exists - update task_id to current task
-                logger.info(f"Tool {tool_result.name} already exists (ID: {existing_tool.id}), updating task_id")
-                await self.tool_repo.update(existing_tool.id, {"task_id": task_id})
+                # Tool exists - update task_id and file contents
+                logger.info(f"Tool {tool_result.name} already exists (ID: {existing_tool.id}), updating task_id and files")
+                update_data = {
+                    "task_id": task_id,
+                    **additional_files  # Update all file contents
+                }
+                await self.tool_repo.update(existing_tool.id, update_data)
                 tool_id = existing_tool.id
             else:
                 # Create new tool in tools collection
@@ -414,7 +421,8 @@ class TaskService:
                     result=tool_result,
                     task_id=task_id,
                     file_path=file_path,
-                    code=tool_code
+                    code=tool_code,
+                    **additional_files  # Pass all file contents
                 )
 
             # Set tool ID in task (singular field, not array)
@@ -447,10 +455,22 @@ class TaskService:
             failure: Single ToolGenerationFailure object
         """
         try:
+            # Get task to retrieve job_id_short and read partial files
+            task = await self.task_repo.get_by_id(task_id)
+            if task:
+                # Try to read partial files (using generic tool name from requirement)
+                tool_name = failure.toolRequirement.description.split()[0] if failure.toolRequirement.description else "unknown"
+                # Sanitize tool name
+                tool_name = "".join(c for c in tool_name if c.isalnum() or c == "_").lower()
+                partial_files = self._read_task_files(task, tool_name)
+            else:
+                partial_files = {}
+
             # Create failure record in tool_failures collection
             failure_id = await self.tool_failure_repo.create_from_generation_failure(
                 failure=failure,
-                task_id=task_id
+                task_id=task_id,
+                **partial_files  # Pass partial file contents
             )
 
             # Set failure ID in task (singular field, not array)
@@ -481,6 +501,89 @@ class TaskService:
         except Exception as e:
             logger.error(f"Error storing generation failure for task {task_id}: {e}")
             # Don't raise - we don't want this to fail the entire workflow
+
+    def _read_task_files(self, task: Task, tool_name: str) -> Dict[str, Optional[str]]:
+        """
+        Read all generated files for a task (tool code, test, plan, search results).
+
+        Args:
+            task: Task object with job_id and task_id
+            tool_name: Name of the tool (without .py extension)
+
+        Returns:
+            Dict with file contents (None if file doesn't exist)
+        """
+        task_dir = os.path.join(self.settings.tools_path, task.job_id, task.task_id)
+
+        files = {
+            "code": None,
+            "test_code": None,
+            "implementation_plan": None,
+            "function_spec": None,
+            "contracts_plan": None,
+            "validation_rules": None,
+            "test_requirements": None,
+            "search_results": None
+        }
+
+        # Read main tool code file
+        tool_file = os.path.join(task_dir, f"{tool_name}.py")
+        if os.path.exists(tool_file):
+            try:
+                with open(tool_file, "r") as f:
+                    files["code"] = f.read()
+                    logger.debug(f"Read tool code file: {tool_file}")
+            except Exception as e:
+                logger.warning(f"Failed to read tool code file {tool_file}: {e}")
+
+        # Read test file
+        test_file = os.path.join(task_dir, "tests", f"test_{tool_name}.py")
+        if os.path.exists(test_file):
+            try:
+                with open(test_file, "r") as f:
+                    files["test_code"] = f.read()
+                    logger.debug(f"Read test file: {test_file}")
+            except Exception as e:
+                logger.warning(f"Failed to read test file {test_file}: {e}")
+
+        # Read plan files
+        plan_dir = os.path.join(task_dir, "plan")
+        plan_files_map = {
+            "implementation_plan": "implementation_plan.txt",
+            "function_spec": "function_spec.txt",
+            "contracts_plan": "contracts.txt",
+            "validation_rules": "validation_rules.txt",
+            "test_requirements": "test_requirements.txt"
+        }
+
+        for key, filename in plan_files_map.items():
+            file_path = os.path.join(plan_dir, filename)
+            if os.path.exists(file_path):
+                try:
+                    with open(file_path, "r") as f:
+                        files[key] = f.read()
+                        logger.debug(f"Read plan file: {file_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to read plan file {file_path}: {e}")
+
+        # Read search results (find the most recent api_refs_*.md file)
+        searches_dir = os.path.join(task_dir, "searches")
+        if os.path.exists(searches_dir):
+            try:
+                # Find all api_refs files (both .md and .json for backwards compatibility)
+                api_ref_files = [f for f in os.listdir(searches_dir)
+                                if f.startswith("api_refs_") and (f.endswith(".md") or f.endswith(".json"))]
+                if api_ref_files:
+                    # Sort by modification time, get most recent
+                    api_ref_files.sort(key=lambda f: os.path.getmtime(os.path.join(searches_dir, f)), reverse=True)
+                    latest_file = os.path.join(searches_dir, api_ref_files[0])
+                    with open(latest_file, "r") as f:
+                        files["search_results"] = f.read()
+                        logger.debug(f"Read search results: {latest_file}")
+            except Exception as e:
+                logger.warning(f"Failed to read search results from {searches_dir}: {e}")
+
+        return files
 
     async def _update_task_status(self, task_id: str, status: TaskStatus, error_message: Optional[str] = None):
         """Update task status and notify via WebSocket."""

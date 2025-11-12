@@ -31,6 +31,14 @@ export interface ToolFile {
   endpoint: string | null;
   registered: boolean;
   createdAt: string;
+  // Additional file contents
+  testCode?: string;
+  implementationPlan?: string;
+  functionSpec?: string;
+  contractsPlan?: string;
+  validationRules?: string;
+  testRequirements?: string;
+  searchResults?: string;
 }
 
 export interface ToolGenerationFailure {
@@ -78,6 +86,12 @@ export interface TaskFilesResponse {
   testCode?: string;
   toolFileName?: string;
   testFileName?: string;
+  implementationPlan?: string;
+  functionSpec?: string;
+  contractsPlan?: string;
+  validationRules?: string;
+  testRequirements?: string;
+  searchResults?: string;
   error?: string;
 }
 

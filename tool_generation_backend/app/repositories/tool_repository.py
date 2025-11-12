@@ -43,7 +43,14 @@ class ToolRepository(BaseRepository[Tool]):
         result: ToolGenerationResult,
         task_id: str,
         file_path: str,
-        code: str
+        code: str,
+        test_code: Optional[str] = None,
+        implementation_plan: Optional[str] = None,
+        function_spec: Optional[str] = None,
+        contracts_plan: Optional[str] = None,
+        validation_rules: Optional[str] = None,
+        test_requirements: Optional[str] = None,
+        search_results: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Serialize ToolGenerationResult to MongoDB-ready dictionary.
@@ -53,11 +60,18 @@ class ToolRepository(BaseRepository[Tool]):
             task_id: Task ID that generated this tool
             file_path: Path where tool file is stored
             code: Python code implementation
+            test_code: Test file contents (optional)
+            implementation_plan: Implementation plan file contents (optional)
+            function_spec: Function specification file contents (optional)
+            contracts_plan: Contracts file contents (optional)
+            validation_rules: Validation rules file contents (optional)
+            test_requirements: Test requirements file contents (optional)
+            search_results: API exploration results (optional)
 
         Returns:
             Dict ready for MongoDB insertion
         """
-        return {
+        data = {
             "name": result.name,
             "file_name": result.file_name,
             "file_path": file_path,
@@ -68,15 +82,31 @@ class ToolRepository(BaseRepository[Tool]):
             "dependencies": result.dependencies,
             "test_cases": [],  # Will be added later if needed
             "status": ToolStatus.DRAFT.value,  # Serialize enum to string
-            "task_id": task_id
+            "task_id": task_id,
+            # File contents
+            "test_code": test_code,
+            "implementation_plan": implementation_plan,
+            "function_spec": function_spec,
+            "contracts_plan": contracts_plan,
+            "validation_rules": validation_rules,
+            "test_requirements": test_requirements,
+            "search_results": search_results
         }
+        return data
 
     async def create_from_generation_result(
         self,
         result: ToolGenerationResult,
         task_id: str,
         file_path: str,
-        code: str
+        code: str,
+        test_code: Optional[str] = None,
+        implementation_plan: Optional[str] = None,
+        function_spec: Optional[str] = None,
+        contracts_plan: Optional[str] = None,
+        validation_rules: Optional[str] = None,
+        test_requirements: Optional[str] = None,
+        search_results: Optional[str] = None
     ) -> str:
         """
         Create a new tool from a generation result.
@@ -86,12 +116,28 @@ class ToolRepository(BaseRepository[Tool]):
             task_id: Task ID that generated this tool
             file_path: Path where tool file is stored
             code: Python code implementation
+            test_code: Test file contents (optional)
+            implementation_plan: Implementation plan file contents (optional)
+            function_spec: Function specification file contents (optional)
+            contracts_plan: Contracts file contents (optional)
+            validation_rules: Validation rules file contents (optional)
+            test_requirements: Test requirements file contents (optional)
+            search_results: API exploration results (optional)
 
         Returns:
             str: Created tool ID
         """
         try:
-            tool_data = self._serialize_tool_data(result, task_id, file_path, code)
+            tool_data = self._serialize_tool_data(
+                result, task_id, file_path, code,
+                test_code=test_code,
+                implementation_plan=implementation_plan,
+                function_spec=function_spec,
+                contracts_plan=contracts_plan,
+                validation_rules=validation_rules,
+                test_requirements=test_requirements,
+                search_results=search_results
+            )
             tool_id = await self.create(tool_data)
             logger.info(f"Created tool {result.name} with ID {tool_id}")
             return tool_id

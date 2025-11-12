@@ -23,7 +23,15 @@ class ToolFailureRepository(BaseRepository[ToolFailure]):
     async def create_from_generation_failure(
         self,
         failure: ToolGenerationFailure,
-        task_id: str
+        task_id: str,
+        code: Optional[str] = None,
+        test_code: Optional[str] = None,
+        implementation_plan: Optional[str] = None,
+        function_spec: Optional[str] = None,
+        contracts_plan: Optional[str] = None,
+        validation_rules: Optional[str] = None,
+        test_requirements: Optional[str] = None,
+        search_results: Optional[str] = None
     ) -> str:
         """
         Create a tool failure record from a ToolGenerationFailure.
@@ -31,6 +39,14 @@ class ToolFailureRepository(BaseRepository[ToolFailure]):
         Args:
             failure: ToolGenerationFailure object from agent
             task_id: Task ID that attempted generation
+            code: Partial tool code (if generated before failure)
+            test_code: Partial test file contents (optional)
+            implementation_plan: Partial implementation plan file contents (optional)
+            function_spec: Partial function specification file contents (optional)
+            contracts_plan: Partial contracts file contents (optional)
+            validation_rules: Partial validation rules file contents (optional)
+            test_requirements: Partial test requirements file contents (optional)
+            search_results: Partial API exploration results (optional)
 
         Returns:
             str: Created failure record ID
@@ -43,6 +59,15 @@ class ToolFailureRepository(BaseRepository[ToolFailure]):
                 "user_requirement": failure.toolRequirement.model_dump() if hasattr(failure.toolRequirement, 'model_dump') else failure.toolRequirement,
                 "error_message": failure.error,
                 "error_type": failure.error_type,
+                # Partial file contents
+                "code": code,
+                "test_code": test_code,
+                "implementation_plan": implementation_plan,
+                "function_spec": function_spec,
+                "contracts_plan": contracts_plan,
+                "validation_rules": validation_rules,
+                "test_requirements": test_requirements,
+                "search_results": search_results
             }
 
             failure_id = await self.create(failure_data)

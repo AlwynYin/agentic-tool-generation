@@ -25,3 +25,37 @@ class ToolFailure(DatabaseModel):
         default=None,
         description="Category of failure (malformed, too_broad, not_chemistry, etc.)"
     )
+
+    # Partial file contents from failed generation (if available)
+    code: Optional[str] = Field(
+        default=None,
+        description="Main tool code (if generated before failure)"
+    )
+    test_code: Optional[str] = Field(
+        default=None,
+        description="Test file contents (if generated before failure)"
+    )
+    implementation_plan: Optional[str] = Field(
+        default=None,
+        description="Implementation plan file contents (if generated before failure)"
+    )
+    function_spec: Optional[str] = Field(
+        default=None,
+        description="Function specification file contents (if generated before failure)"
+    )
+    contracts_plan: Optional[str] = Field(
+        default=None,
+        description="Contracts file contents (if generated before failure)"
+    )
+    validation_rules: Optional[str] = Field(
+        default=None,
+        description="Validation rules file contents (if generated before failure)"
+    )
+    test_requirements: Optional[str] = Field(
+        default=None,
+        description="Test requirements file contents (if generated before failure)"
+    )
+    search_results: Optional[str] = Field(
+        default=None,
+        description="API exploration results (if generated before failure)"
+    )

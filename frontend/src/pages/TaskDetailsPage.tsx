@@ -227,7 +227,13 @@ export const TaskDetailsPage: React.FC = () => {
       {/* Code Section */}
       <Paper sx={{ mb: 3 }}>
         <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-          <Tabs value={tabValue} onChange={handleTabChange} aria-label="code tabs">
+          <Tabs
+            value={tabValue}
+            onChange={handleTabChange}
+            aria-label="code tabs"
+            variant="scrollable"
+            scrollButtons="auto"
+          >
             <Tab
               icon={<CodeIcon />}
               iconPosition="start"
@@ -239,6 +245,30 @@ export const TaskDetailsPage: React.FC = () => {
               iconPosition="start"
               label={"Test Code"}
               disabled={!files?.testCode}
+            />
+            <Tab
+              label={"Implementation Plan"}
+              disabled={!files?.implementationPlan}
+            />
+            <Tab
+              label={"Function Spec"}
+              disabled={!files?.functionSpec}
+            />
+            <Tab
+              label={"Contracts"}
+              disabled={!files?.contractsPlan}
+            />
+            <Tab
+              label={"Validation Rules"}
+              disabled={!files?.validationRules}
+            />
+            <Tab
+              label={"Test Requirements"}
+              disabled={!files?.testRequirements}
+            />
+            <Tab
+              label={"Search Results"}
+              disabled={!files?.searchResults}
             />
           </Tabs>
         </Box>
@@ -308,6 +338,174 @@ export const TaskDetailsPage: React.FC = () => {
                 {task.status === 'completed' || task.status === 'failed'
                   ? 'Test code not available'
                   : 'Test code will be available when task completes'}
+              </Typography>
+            </Box>
+          )}
+        </TabPanel>
+
+        <TabPanel value={tabValue} index={2}>
+          {files?.implementationPlan ? (
+            <Box
+              component="pre"
+              sx={{
+                m: 0,
+                p: 3,
+                maxHeight: '70vh',
+                overflow: 'auto',
+                backgroundColor: '#1e1e1e',
+                color: '#d4d4d4',
+                fontFamily: 'monospace',
+                fontSize: '14px',
+                whiteSpace: 'pre-wrap',
+                wordWrap: 'break-word',
+              }}
+            >
+              {files.implementationPlan}
+            </Box>
+          ) : (
+            <Box p={3}>
+              <Typography variant="body1" color="text.secondary" align="center">
+                Implementation plan not available
+              </Typography>
+            </Box>
+          )}
+        </TabPanel>
+
+        <TabPanel value={tabValue} index={3}>
+          {files?.functionSpec ? (
+            <Box
+              component="pre"
+              sx={{
+                m: 0,
+                p: 3,
+                maxHeight: '70vh',
+                overflow: 'auto',
+                backgroundColor: '#1e1e1e',
+                color: '#d4d4d4',
+                fontFamily: 'monospace',
+                fontSize: '14px',
+                whiteSpace: 'pre-wrap',
+                wordWrap: 'break-word',
+              }}
+            >
+              {files.functionSpec}
+            </Box>
+          ) : (
+            <Box p={3}>
+              <Typography variant="body1" color="text.secondary" align="center">
+                Function spec not available
+              </Typography>
+            </Box>
+          )}
+        </TabPanel>
+
+        <TabPanel value={tabValue} index={4}>
+          {files?.contractsPlan ? (
+            <Box
+              component="pre"
+              sx={{
+                m: 0,
+                p: 3,
+                maxHeight: '70vh',
+                overflow: 'auto',
+                backgroundColor: '#1e1e1e',
+                color: '#d4d4d4',
+                fontFamily: 'monospace',
+                fontSize: '14px',
+                whiteSpace: 'pre-wrap',
+                wordWrap: 'break-word',
+              }}
+            >
+              {files.contractsPlan}
+            </Box>
+          ) : (
+            <Box p={3}>
+              <Typography variant="body1" color="text.secondary" align="center">
+                Contracts not available
+              </Typography>
+            </Box>
+          )}
+        </TabPanel>
+
+        <TabPanel value={tabValue} index={5}>
+          {files?.validationRules ? (
+            <Box
+              component="pre"
+              sx={{
+                m: 0,
+                p: 3,
+                maxHeight: '70vh',
+                overflow: 'auto',
+                backgroundColor: '#1e1e1e',
+                color: '#d4d4d4',
+                fontFamily: 'monospace',
+                fontSize: '14px',
+                whiteSpace: 'pre-wrap',
+                wordWrap: 'break-word',
+              }}
+            >
+              {files.validationRules}
+            </Box>
+          ) : (
+            <Box p={3}>
+              <Typography variant="body1" color="text.secondary" align="center">
+                Validation rules not available
+              </Typography>
+            </Box>
+          )}
+        </TabPanel>
+
+        <TabPanel value={tabValue} index={6}>
+          {files?.testRequirements ? (
+            <Box
+              component="pre"
+              sx={{
+                m: 0,
+                p: 3,
+                maxHeight: '70vh',
+                overflow: 'auto',
+                backgroundColor: '#1e1e1e',
+                color: '#d4d4d4',
+                fontFamily: 'monospace',
+                fontSize: '14px',
+                whiteSpace: 'pre-wrap',
+                wordWrap: 'break-word',
+              }}
+            >
+              {files.testRequirements}
+            </Box>
+          ) : (
+            <Box p={3}>
+              <Typography variant="body1" color="text.secondary" align="center">
+                Test requirements not available
+              </Typography>
+            </Box>
+          )}
+        </TabPanel>
+
+        <TabPanel value={tabValue} index={7}>
+          {files?.searchResults ? (
+            <Box
+              component="pre"
+              sx={{
+                m: 0,
+                p: 3,
+                maxHeight: '70vh',
+                overflow: 'auto',
+                backgroundColor: '#1e1e1e',
+                color: '#d4d4d4',
+                fontFamily: 'monospace',
+                fontSize: '14px',
+                whiteSpace: 'pre-wrap',
+                wordWrap: 'break-word',
+              }}
+            >
+              {files.searchResults}
+            </Box>
+          ) : (
+            <Box p={3}>
+              <Typography variant="body1" color="text.secondary" align="center">
+                Search results not available
               </Typography>
             </Box>
           )}
