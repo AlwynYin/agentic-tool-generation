@@ -27,29 +27,10 @@ def authenticate_claude(api_key: Optional[str] = None) -> bool:
     Returns:
         bool: True if authentication successful, False otherwise
     """
-    try:
-        # Check if claude is available
-        which_result = subprocess.run(['which', 'claude'], capture_output=True, text=True)
-        if which_result.returncode != 0:
-            logging.error("❌ Claude Code CLI not found in PATH")
-            return False
-
-        claude_path = which_result.stdout.strip()
-        logging.info(f"✅ Found Claude Code CLI at: {claude_path}")
-
-        # Claude Code can use existing authentication or API key via environment
-        if api_key:
-            logging.info("🔐 Setting ANTHROPIC_API_KEY for Claude Code CLI...")
-            # API key will be set in environment when running commands
-            logging.info("✅ Claude Code will use provided API key")
-        else:
-            logging.info("ℹ️  Claude Code will use existing authentication (claude login)")
-
-        return True
-
-    except Exception as e:
-        logging.error(f"❌ Claude Code authentication error: {e}")
+    if api_key is None:
         return False
+    logger.info(f"Claude API key is present")
+    return True
 
 
 async def run_claude_query(

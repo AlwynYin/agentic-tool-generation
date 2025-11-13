@@ -275,7 +275,20 @@ Read and follow the specifications in these files:
 4. **Use the API references** to call the correct library functions
 5. **Address previous feedback** if iteration history exists (this means you need to UPDATE the existing file, not create from scratch)
 6. **Check tools/tool_schema.txt** for format of the file and key requirements of the tool function
-7. **Note:** if the tool generates a plot, BE CAREFUL not to show the plot, instead save the figure into a file.
+7. **File I/O Guidelines:**
+   - If the tool generates plots/visualizations, save them to files (DO NOT show/display them)
+   - All output file paths MUST be function parameters (e.g., `output_file: str`)
+   - All intermediate files (e.g., .chk files) MUST use a parametrized directory (add `work_dir: str = "."` parameter)
+   - Include all created file paths in the return metadata
+   - NEVER hardcode file paths - always use parameters
+
+   Example for intermediate files:
+   ```python
+   def my_tool(input_data: str, work_dir: str = ".") -> Dict[str, Any]:
+       # Intermediate file in parametrized directory
+       checkpoint_file = os.path.join(work_dir, "calculation.chk")
+       # ... use checkpoint_file ...
+   ```
 
 ## Output
 

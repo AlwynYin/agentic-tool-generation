@@ -245,7 +245,8 @@ Review tool implementations and test results to decide if the tool is ready for 
 - Correct API usage (based on plan)
 - Proper error handling (returns errors via dict, never raises exceptions)
 - Returns correct output type (Dict[str, Any] with success, error, result keys)
-- Stateless (no global state, no side effects, output only via return)
+- Stateless computation (no global state, output via return)
+- File I/O is ALLOWED if paths are parametrized (not hardcoded)
 
 **If any major fails → REJECT with required changes.**
 
@@ -276,12 +277,17 @@ Review tool implementations and test results to decide if the tool is ready for 
 - No timestamp dependencies
 - No global state
 
-**Stateless:**
+**Stateless Computation:**
 - No modification of global variables
-- No side effects (file writes, network calls)
-- Output only via return statement
+- Primary output via return statement
 - Input parameters not modified
+- **File I/O ALLOWED** if paths are parametrized:
+  * File paths must be function parameters (not hardcoded)
+  * Intermediate files (e.g., .chk files) must use parametrized directories (e.g., work_dir parameter)
+  * File paths should be included in return metadata
+- Network calls should be avoided unless necessary for the tool's purpose
 
+**Hardcoded file paths or non-parametrized directories → MAJOR issue → Required change.**
 **Non-deterministic behavior → MAJOR issue → Required change.**
 
 ### 4. Code Quality
@@ -371,6 +377,7 @@ ReviewReport(
 - Non-deterministic behavior
 - Incorrect error handling
 - Global state or side effects
+- Hardcoded file paths or non-parametrized directories
 
 ## Change Types:
 
@@ -426,6 +433,11 @@ ReviewReport(
 4. **Non-Deterministic:**
    - "Uses random() without setting seed"
    - "Output depends on current timestamp"
+
+5. **Hardcoded Paths:**
+   - "File path is hardcoded to 'output.png', should be a function parameter"
+   - "Intermediate files (.chk) use hardcoded paths, should use work_dir parameter"
+   - "Creates files in current directory without parametrized control"
 
 ## Iteration Awareness:
 

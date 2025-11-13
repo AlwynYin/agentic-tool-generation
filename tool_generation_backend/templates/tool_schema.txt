@@ -79,11 +79,16 @@ A Tool is a Python function that does one single computation task, with a well-t
 
 1. **Single Purpose**: The tool should not be over-complicated with multiple capabilities. If there are multiple separate jobs, there should be multiple separate tools.
 
-2. **Stateless**: The tool must be completely stateless. This means:
+2. **Stateless Computation**: The tool must have stateless computation logic. This means:
    - No global state usage
    - No modification of outer scope variables
-   - Output ONLY via Python's `return` statement
+   - Primary output via Python's `return` statement
    - No modification of input parameters
+   - **File I/O Allowed:** Tools MAY write files (e.g., visualizations, results, intermediate files) IF:
+     * File paths are provided as function parameters (not hardcoded)
+     * All intermediate files use parametrized directory paths (e.g., `work_dir` parameter)
+     * File paths are included in the return metadata
+     * File writing is necessary for the tool's purpose (e.g., saving plots, generating reports)
 
 3. **Error Handling**: The tool should not raise errors during execution. Instead, it should reflect errors in the return value through the standard return format.
 
@@ -115,7 +120,30 @@ A Tool is a Python function that does one single computation task, with a well-t
 
 3. File System Access:
   - Tools can read from the file system when parameters specify file paths
+  - Tools can write files (plots, results, intermediate files) when paths are parametrized
+  - All output file paths must be function parameters (e.g., `output_file: str`)
+  - All intermediate files must use parametrized directories (e.g., `work_dir: str = "."`)
+  - Include created file paths in return metadata
   - Handle FileNotFoundError and other I/O exceptions appropriately
+  - Example:
+    ```python
+    def my_tool(data: str, output_file: str, work_dir: str = ".") -> Dict[str, Any]:
+        import os
+        # Intermediate file in parametrized directory
+        checkpoint = os.path.join(work_dir, "temp.chk")
+        # ... computation ...
+        # Save result to parametrized output file
+        with open(output_file, 'w') as f:
+            f.write(result)
+        return {
+            "success": True,
+            "result": result,
+            "metadata": {
+                "output_file": output_file,
+                "checkpoint_file": checkpoint
+            }
+        }
+    ```
 
 4. Execution Guard:
   - Include if __name__ == "__main__": block for testing
